@@ -123,7 +123,13 @@ mode: window                # window|raw
 scale: 1.0                  # multiply (e.g., 0.1 to show deci-Pa)
 offset: 0.0                 # add offset if desired
 report_time: 0.8
+# Warm-up guards (recommended): hold output until valid
+require_baseline: true      # wait until [pressure_fan] has a baseline
+min_samples: 10             # window mode: require at least this many samples
 ```
 
 After a restart, “delta_pa” will appear in the Temperatures list; the number is in Pa (units shown by the UI will be °C).
+
+Notes:
+- With the warm-up guards above, the value will stay at 0.0 until a baseline is present and the window has at least `min_samples` readings. This avoids a transient large spike on startup.
 

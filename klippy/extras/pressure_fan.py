@@ -302,7 +302,13 @@ class PressureFan:
                 raise self.printer.command_error("No pressure reading available to capture baseline")
             self.baseline_pressure = p
         else:
-            self.baseline_pressure = gcmd.get_float('BASELINE')
+            val = gcmd.get_float('BASELINE')
+            # Heuristic: if a value looks like hPa (e.g., 949.7), convert to Pa
+            if val < 2000.0:
+                logging.info("pressure_fan %s: converting baseline from hPa to Pa (%.3f -> %.1f)",
+                             self.name, val, val * 100.0)
+                val *= 100.0
+            self.baseline_pressure = val
 
     cmd_QUERY_PRESSURE_FAN_help = "Report current pressure, baseline, delta, windowed average, target, and fan speed"
     def cmd_QUERY_PRESSURE_FAN(self, gcmd):

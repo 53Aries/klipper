@@ -30,6 +30,11 @@ class PressureDeltaSensor:
         self.scale = config.getfloat('scale', 1.0)
         self.offset = config.getfloat('offset', 0.0)
         self.report_time = config.getfloat('report_time', REPORT_TIME, above=0.1)
+        # Warm-up/validity guards
+        # - require_baseline: do not report until the pressure_fan has a baseline
+        # - min_samples: for window mode, require at least this many samples in the window
+        self.require_baseline = config.getboolean('require_baseline', True)
+        self.min_samples = config.getint('min_samples', 10, minval=0)
 
         self.temp = 0.0
         self.min_temp = -999999.0
@@ -64,11 +69,18 @@ class PressureDeltaSensor:
         try:
             if self.pfan is not None:
                 if self.mode == 'window':
+                    # Windowed average; require a minimum number of samples if configured
                     avg, n = self.pfan.get_window_delta()
-                    val = avg if avg is not None else None
+                    val = avg if (avg is not None and n >= int(self.min_samples)) else None
+                    # Optionally also require baseline presence (should already be implied)
+                    if val is not None and self.require_baseline:
+                        _p, b, _d = self.pfan.get_pressure()
+                        if b is None:
+                            val = None
                 else:
-                    _p, _b, delta = self.pfan.get_pressure()
-                    val = delta
+                    # Raw delta requires baseline if configured
+                    _p, b, delta = self.pfan.get_pressure()
+                    val = delta if (not self.require_baseline or b is not None) else None
                 if val is not None:
                     self.temp = self.scale * float(val) + self.offset
             # Emit callback in MCU time base for graph alignment
