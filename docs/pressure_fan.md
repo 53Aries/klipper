@@ -18,7 +18,10 @@ Tip: For stable behavior with slow, low-noise decisions, prefer high pressure ov
 ```
 [pressure_fan exhaust]
 # Fan wiring
-pin: <your_fan_pin>
+# Option A: Use an existing fan so UI shows a slider/percent (recommended)
+fan: exhaust                 # references [fan_generic exhaust] below
+# Option B: control the pin directly in this section (omit 'fan:' and set pin)
+# pin: <your_fan_pin>
 # Optional PWM tuning
 # cycle_time: 0.010
 # hardware_pwm: False
@@ -59,6 +62,14 @@ sensor_type: bme280
 # Recommended chip filtering/oversampling
 bme280_oversample_pressure: 5   # 16×
 bme280_iir_filter: 0            # off
+
+# Example [fan_generic] so Mainsail shows the fan slider
+[fan_generic exhaust]
+pin: <your_fan_pin>
+min_speed: 0.0
+max_speed: 1.0
+off_below: 0.20
+kick_start_time: 0.5
 ```
 
 Notes:

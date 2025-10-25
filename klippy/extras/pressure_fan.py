@@ -25,8 +25,19 @@ class PressureFan:
         self.printer = config.get_printer()
         self.reactor = self.printer.get_reactor()
 
-        # Fan output (standard fan config keys apply: pin, cycle_time, etc.)
-        self.fan = fan.Fan(config, default_shutdown_speed=0.0)
+        # Fan output
+        # Option A: reference an existing [fan*] by name (preferred for UI visibility)
+        #   fan: <existing_fan_name>
+        # Option B: specify pin/cycle_time/etc. directly in this section
+        ref_fan_name = config.get('fan', None)
+        if ref_fan_name:
+            try:
+                self.fan = self.printer.lookup_object('fan ' + ref_fan_name)
+            except Exception:
+                raise config.error("pressure_fan %s: referenced fan '%s' not found" % (self.name, ref_fan_name))
+        else:
+            # Create a dedicated fan driven by this module
+            self.fan = fan.Fan(config, default_shutdown_speed=0.0)
         # Sensor setup (reuse Klipper heaters sensor pattern)
         # Expect sensor_type and its settings (e.g., BME280 + I2C) within this section
         pheaters = self.printer.load_object(config, 'heaters')
