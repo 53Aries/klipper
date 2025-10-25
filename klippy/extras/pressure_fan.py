@@ -19,7 +19,8 @@ DEFAULT_MAX_TEMP = 85.0
 class PressureFan:
     def __init__(self, config):
         # Basics
-        self.name = config.get_name().split()[1]
+        self.section = config.get_name()
+        self.name = self.section.split()[1]
         self.printer = config.get_printer()
         self.reactor = self.printer.get_reactor()
 
@@ -43,7 +44,8 @@ class PressureFan:
         self.min_speed = self.min_speed_conf
 
         # Target and baseline
-        self.target_delta_conf = config.getfloat('target_delta', DEFAULT_TARGET_DELTA_PA)
+        # Default target 0.0 so it stays off until the user sets a target
+        self.target_delta_conf = config.getfloat('target_delta', 0.0)
         self.target_delta = self.target_delta_conf
         self.baseline_pressure = config.getfloat('baseline_pressure', None)
         self.auto_set_baseline = config.getboolean('auto_set_baseline', False)
@@ -72,6 +74,11 @@ class PressureFan:
             'QUERY_PRESSURE_FAN', 'PRESSURE_FAN', self.name,
             self.cmd_QUERY_PRESSURE_FAN,
             desc=self.cmd_QUERY_PRESSURE_FAN_help)
+        # PID autotune command
+        gcode.register_mux_command(
+            'PRESSURE_PID_CALIBRATE', 'PRESSURE_FAN', self.name,
+            self.cmd_PRESSURE_PID_CALIBRATE,
+            desc=self.cmd_PRESSURE_PID_CALIBRATE_help)
 
         # Connect/ready hooks
         self.printer.register_event_handler('klippy:connect', self._on_connect)
@@ -124,6 +131,8 @@ class PressureFan:
 
     def set_pf_speed(self, read_time, value):
         # Bound
+        if self.target_delta <= 0.0:
+            value = 0.0
         if value <= 0.0:
             value = 0.0
         elif value < self.min_speed:
@@ -161,6 +170,12 @@ class PressureFan:
     def get_pressure(self):
         # returns (current_pressure_Pa, baseline_Pa, current_delta_Pa)
         return self.get_current_delta()
+    def alter_target_delta(self, value):
+        self.target_delta = value
+    def set_control(self, control):
+        old = self.control
+        self.control = control
+        return old
 
     # GCode commands
     cmd_SET_PRESSURE_FAN_TARGET_help = (
@@ -201,6 +216,40 @@ class PressureFan:
         gcmd.respond_info(
             "pressure_fan %s: P=%.2f Pa, baseline=%.2f Pa, delta=%.2f Pa, target=%.2f Pa, speed=%.2f"
             % (self.name, p, base, delta, self.target_delta, speed))
+
+    # PID Autotune G-Code
+    cmd_PRESSURE_PID_CALIBRATE_help = "Run PID calibration for a pressure_fan"
+    def cmd_PRESSURE_PID_CALIBRATE(self, gcmd):
+        target = gcmd.get_float('TARGET_DELTA')
+        write_file = gcmd.get_int('WRITE_FILE', 0)
+        # Install autotune controller
+        calibrate = ControlAutoTune(self, target)
+        old_control = self.set_control(calibrate)
+        # Seed targets and start
+        self.alter_target_delta(target)
+        # Block until autotune completes
+        reactor = self.printer.get_reactor()
+        eventtime = reactor.monotonic()
+        try:
+            while calibrate.check_busy() and not self.printer.is_shutdown():
+                eventtime = reactor.pause(eventtime + 1.0)
+        finally:
+            self.set_control(old_control)
+        if write_file:
+            calibrate.write_file('/tmp/pressure_tune.txt')
+        Kp, Ki, Kd = calibrate.calc_final_pid()
+        if Kp == 0.0 and Ki == 0.0 and Kd == 0.0:
+            raise self.printer.command_error("PRESSURE_PID_CALIBRATE: insufficient data collected")
+        logging.info("Pressure PID Autotune final: Kp=%.3f Ki=%.3f Kd=%.3f", Kp, Ki, Kd)
+        gcmd.respond_info(
+            "PID parameters: pid_Kp=%.3f pid_Ki=%.3f pid_Kd=%.3f\n"
+            "Use SAVE_CONFIG to persist these in your config." % (Kp, Ki, Kd))
+        # Store results for SAVE_CONFIG
+        configfile = self.printer.lookup_object('configfile')
+        configfile.set(self.section, 'control', 'pid')
+        configfile.set(self.section, 'pid_Kp', "%.3f" % (Kp,))
+        configfile.set(self.section, 'pid_Ki', "%.3f" % (Ki,))
+        configfile.set(self.section, 'pid_Kd', "%.3f" % (Kd,))
 
     # Status
     def get_status(self, eventtime):
@@ -283,5 +332,126 @@ class ControlPID:
             self.prev_integ = integ
 
 
+######################################################################
+# PID Autotune (relay/oscillation method)
+######################################################################
+
+TUNE_DELTA_PA = 2.0
+
+class ControlAutoTune:
+    def __init__(self, pressure_fan, target_delta):
+        self.pfan = pressure_fan
+        self.calibrate_delta = target_delta
+        self.heating = False  # fan on => increasing vacuum
+        self.peak = 0.0
+        self.peak_time = 0.0
+        self.peaks = []
+        self.last_speed = -1.0
+
+    def pressure_callback(self, read_time, pressure_pa):
+        # Measure current delta
+        _, _, delta = self.pfan.get_pressure()
+        if delta is None:
+            return
+        # Toggle around the target +/- TUNE_DELTA_PA
+        if self.heating and delta >= self.calibrate_delta:
+            self.heating = False
+            self._check_peaks()
+            self.pfan.alter_target_delta(self.calibrate_delta - TUNE_DELTA_PA)
+        elif not self.heating and delta <= self.calibrate_delta:
+            self.heating = True
+            self._check_peaks()
+            self.pfan.alter_target_delta(self.calibrate_delta)
+
+        # Track peaks
+        if self.heating:
+            # Increase vacuum -> look for minimum pressure or maximum delta
+            # We treat delta peaks: when heating, delta should be rising; track max
+            if delta > self.peak:
+                self.peak = delta
+                self.peak_time = read_time
+        else:
+            # Fan off -> delta falls; track min (use negative for uniformity)
+            if self.peak == 0.0 or delta < self.peak:
+                self.peak = delta
+                self.peak_time = read_time
+
+        # Command fan
+        speed = self.pfan.max_speed if self.heating else 0.0
+        if speed != self.last_speed:
+            self.last_speed = speed
+            self.pfan.set_pf_speed(read_time, speed)
+
+    def _check_peaks(self):
+        # Record last peak and reset tracker
+        self.peaks.append((self.peak, self.peak_time))
+        # Reset peak sentinel based on new state
+        if self.heating:
+            self.peak = 0.0
+        else:
+            self.peak = 0.0
+        if len(self.peaks) >= 4:
+            self._calc_pid(len(self.peaks) - 1)
+
+    def _calc_pid(self, pos):
+        # Use Astrom-Hagglund method on delta oscillation
+        temp_diff = self.peaks[pos][0] - self.peaks[pos-1][0]
+        time_diff = self.peaks[pos][1] - self.peaks[pos-2][1]
+        amplitude = 0.5 * abs(temp_diff)
+        if amplitude <= 0 or time_diff <= 0:
+            return 0.0, 0.0, 0.0
+        # Effective gain: oscillation driven by 0..max_speed
+        Ku = 4. * self.pfan.max_speed / (3.1415926535 * amplitude)
+        Tu = time_diff
+        Ti = 0.5 * Tu
+        Td = 0.125 * Tu
+        Kp = 0.6 * Ku * PID_PARAM_BASE
+        Ki = Kp / Ti
+        Kd = Kp * Td
+        logging.info("Pressure Autotune: raw=%f Ku=%f Tu=%f  Kp=%f Ki=%f Kd=%f",
+                     temp_diff, Ku, Tu, Kp, Ki, Kd)
+        return Kp, Ki, Kd
+
+    def calc_final_pid(self):
+        if len(self.peaks) < 6:
+            return 0.0, 0.0, 0.0
+        cycle_times = [(self.peaks[pos][1] - self.peaks[pos-2][1], pos)
+                       for pos in range(4, len(self.peaks))]
+        midpoint_pos = sorted(cycle_times)[len(cycle_times)//2][1]
+        return self._calc_pid(midpoint_pos)
+
+    def check_busy(self):
+        # Wait for sufficient peaks
+        return len(self.peaks) < 12
+
+    # Optional logging
+    def write_file(self, filename):
+        try:
+            with open(filename, 'w') as f:
+                for p, t in self.peaks:
+                    f.write(f"{t:.3f} {p:.3f}\n")
+        except Exception:
+            logging.exception("Pressure Autotune: failed writing file")
+
+    # Control API compatibility shim
+    def get_status(self, eventtime):
+        return {}
+
+    # Not used, but keep signature similar to other controls
+    def get_temp(self, eventtime):
+        _, _, delta = self.pfan.get_pressure()
+        return delta or 0.0, self.calibrate_delta
+
+    # Unused by autotune
+    def set_tf_speed(self, *args, **kwargs):
+        pass
+
+    def temperature_callback(self, *args, **kwargs):
+        pass
+
+    # PID constants not used here
+
+
 def load_config_prefix(config):
     return PressureFan(config)
+

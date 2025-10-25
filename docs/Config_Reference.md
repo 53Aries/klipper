@@ -3387,9 +3387,10 @@ See the command reference for additional information.
 #   Derivative smoothing window (seconds). Default is 2.0.
 #max_delta: 3.0
 #   Deadband for watermark control (Pa). Only used with control='watermark'.
-#target_delta: 15.0
+#target_delta: 0.0
 #   Target vacuum in Pascals relative to baseline (positive means chamber
-#   pressure lower than baseline). Default is 15 Pa.
+#   pressure lower than baseline). Default is 0 Pa (off). Set a value at
+#   runtime with SET_PRESSURE_FAN_TARGET to start the controller.
 #baseline_pressure:
 #   Absolute baseline pressure in Pascals. If not set, the baseline can be
 #   captured at runtime with SET_PRESSURE_BASELINE, or automatically if

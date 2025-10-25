@@ -1529,6 +1529,13 @@ current sensor reading is captured and used as the baseline.
 `QUERY_PRESSURE_FAN PRESSURE_FAN=<name>`: Reports the current pressure,
 baseline, measured delta, target delta, and fan speed.
 
+#### PRESSURE_PID_CALIBRATE
+`PRESSURE_PID_CALIBRATE PRESSURE_FAN=<name> TARGET_DELTA=<Pa> [WRITE_FILE=1]`:
+Runs a relay/oscillation autotune to determine PID gains for the specified
+pressure_fan at the given target delta (Pa). On completion, reports suggested
+`pid_Kp`, `pid_Ki`, and `pid_Kd`, and stores them for `SAVE_CONFIG`. The
+optional `WRITE_FILE=1` writes a brief trace to `/tmp/pressure_tune.txt`.
+
 ### [temperature_probe]
 
 The following commands are available when a
