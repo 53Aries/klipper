@@ -3387,6 +3387,10 @@ See the command reference for additional information.
 #   Derivative smoothing window (seconds). Default is 2.0.
 #max_delta: 3.0
 #   Deadband for watermark control (Pa). Only used with control='watermark'.
+#
+#   PID autotune: Use the `PRESSURE_PID_CALIBRATE` command to determine gains.
+#   Optional autotune knobs: BAND_PA, MIN_CYCLES, MAX_CYCLES, MAX_TIME,
+#   SETTLE_SEC, FILTER_ALPHA, PEAK_DEADBAND (see G-Codes.md for details).
 #target_delta: 0.0
 #   Target vacuum in Pascals relative to baseline (positive means chamber
 #   pressure lower than baseline). Default is 0 Pa (off). Set a value at

@@ -1530,11 +1530,27 @@ current sensor reading is captured and used as the baseline.
 baseline, measured delta, target delta, and fan speed.
 
 #### PRESSURE_PID_CALIBRATE
-`PRESSURE_PID_CALIBRATE PRESSURE_FAN=<name> TARGET_DELTA=<Pa> [WRITE_FILE=1]`:
+`PRESSURE_PID_CALIBRATE PRESSURE_FAN=<name> TARGET_DELTA=<Pa> [WRITE_FILE=1]
+ [BAND_PA=<Pa>] [MIN_CYCLES=<n>] [MAX_CYCLES=<n>] [MAX_TIME=<sec>]
+ [SETTLE_SEC=<sec>] [FILTER_ALPHA=<0..1>] [PEAK_DEADBAND=<Pa>]`:
+
 Runs a relay/oscillation autotune to determine PID gains for the specified
 pressure_fan at the given target delta (Pa). On completion, reports suggested
-`pid_Kp`, `pid_Ki`, and `pid_Kd`, and stores them for `SAVE_CONFIG`. The
-optional `WRITE_FILE=1` writes a brief trace to `/tmp/pressure_tune.txt`.
+`pid_Kp`, `pid_Ki`, and `pid_Kd`, and stores them for `SAVE_CONFIG`.
+
+Options (all optional):
+- `WRITE_FILE=1`: Write a brief trace to `/tmp/pressure_tune.txt`.
+- `BAND_PA`: Width of the relay band around the target (Pa). Default: 2.0 Pa.
+- `MIN_CYCLES`: Minimum oscillation cycles to collect before computing gains
+  (each cycle is two peaks). Default: 12.
+- `MAX_CYCLES`: Maximum cycles to collect before stopping (cap). Default: 24.
+- `MAX_TIME`: Maximum autotune runtime in seconds (cap). Default: 600.
+- `SETTLE_SEC`: Minimum time to remain in each state (fan on/off) to allow
+  pressure to settle before switching. Default: 2.0 sec.
+- `FILTER_ALPHA`: Exponential smoothing factor applied to the measured delta
+  during autotune (0=no smoothing, 1=full smoothing). Default: 0.3.
+- `PEAK_DEADBAND`: Peak detection deadband (Pa) to ignore tiny fluctuations.
+  Default: 0.3 Pa.
 
 ### [temperature_probe]
 

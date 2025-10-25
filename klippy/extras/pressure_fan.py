@@ -218,12 +218,30 @@ class PressureFan:
             % (self.name, p, base, delta, self.target_delta, speed))
 
     # PID Autotune G-Code
-    cmd_PRESSURE_PID_CALIBRATE_help = "Run PID calibration for a pressure_fan"
+    cmd_PRESSURE_PID_CALIBRATE_help = (
+        "Run PID calibration for a pressure_fan. Optional args: "
+        "BAND_PA=<Pa> MIN_CYCLES=<n> MAX_CYCLES=<n> MAX_TIME=<sec> "
+        "SETTLE_SEC=<sec> FILTER_ALPHA=<0..1> PEAK_DEADBAND=<Pa>"
+    )
     def cmd_PRESSURE_PID_CALIBRATE(self, gcmd):
         target = gcmd.get_float('TARGET_DELTA')
         write_file = gcmd.get_int('WRITE_FILE', 0)
+        band_pa = gcmd.get_float('BAND_PA', TUNE_DELTA_PA)
+        min_cycles = gcmd.get_int('MIN_CYCLES', 12)
+        max_cycles = gcmd.get_int('MAX_CYCLES', 24)
+        max_time = gcmd.get_float('MAX_TIME', 600.0)
+        settle_sec = gcmd.get_float('SETTLE_SEC', 2.0)
+        filter_alpha = gcmd.get_float('FILTER_ALPHA', 0.3)
+        peak_deadband = gcmd.get_float('PEAK_DEADBAND', 0.3)
         # Install autotune controller
-        calibrate = ControlAutoTune(self, target)
+        calibrate = ControlAutoTune(self, target,
+                                    band_pa=band_pa,
+                                    min_cycles=min_cycles,
+                                    max_cycles=max_cycles,
+                                    max_time=max_time,
+                                    settle_sec=settle_sec,
+                                    filter_alpha=filter_alpha,
+                                    peak_deadband=peak_deadband)
         old_control = self.set_control(calibrate)
         # Seed targets and start
         self.alter_target_delta(target)
@@ -339,44 +357,75 @@ class ControlPID:
 TUNE_DELTA_PA = 2.0
 
 class ControlAutoTune:
-    def __init__(self, pressure_fan, target_delta):
+    def __init__(self, pressure_fan, target_delta,
+                 band_pa=TUNE_DELTA_PA, min_cycles=12, max_cycles=24,
+                 max_time=600.0, settle_sec=2.0, filter_alpha=0.3,
+                 peak_deadband=0.3):
         self.pfan = pressure_fan
         self.calibrate_delta = target_delta
+        # Relay/band and timing configuration
+        self.band_pa = max(0.1, float(band_pa))
+        self.min_cycles = int(max(2, min_cycles))
+        self.max_cycles = int(max(self.min_cycles, max_cycles))
+        self.max_time = float(max_time)
+        self.settle_sec = max(0.0, float(settle_sec))
+        self.alpha = max(0.0, min(1.0, float(filter_alpha)))
+        self.peak_deadband = max(0.0, float(peak_deadband))
+
+        # State
         self.heating = False  # fan on => increasing vacuum
+        self.last_switch_time = 0.0
+        self.delta_filt = None
         self.peak = 0.0
         self.peak_time = 0.0
         self.peaks = []
         self.last_speed = -1.0
+        self.start_time = 0.0
+
+    def _maybe_init(self, read_time, delta):
+        if self.start_time == 0.0:
+            self.start_time = read_time
+            self.last_switch_time = read_time
+        if self.delta_filt is None:
+            self.delta_filt = delta
 
     def pressure_callback(self, read_time, pressure_pa):
         # Measure current delta
         _, _, delta = self.pfan.get_pressure()
         if delta is None:
             return
-        # Toggle around the target +/- TUNE_DELTA_PA
-        if self.heating and delta >= self.calibrate_delta:
-            self.heating = False
-            self._check_peaks()
-            self.pfan.alter_target_delta(self.calibrate_delta - TUNE_DELTA_PA)
-        elif not self.heating and delta <= self.calibrate_delta:
-            self.heating = True
-            self._check_peaks()
-            self.pfan.alter_target_delta(self.calibrate_delta)
+        self._maybe_init(read_time, delta)
+        # Exponential moving average to reduce jitter
+        self.delta_filt = self.alpha * delta + (1.0 - self.alpha) * self.delta_filt
 
-        # Track peaks
+        # Symmetric relay thresholds around target
+        upper = self.calibrate_delta + (self.band_pa * 0.5)
+        lower = self.calibrate_delta - (self.band_pa * 0.5)
+
+        # Only allow state changes after settle_sec
+        can_switch = (read_time - self.last_switch_time) >= self.settle_sec
+        if self.heating and can_switch and self.delta_filt >= upper:
+            self.heating = False
+            self.last_switch_time = read_time
+            self._check_peaks()
+        elif (not self.heating) and can_switch and self.delta_filt <= lower:
+            self.heating = True
+            self.last_switch_time = read_time
+            self._check_peaks()
+
+        # Track peaks with deadband to avoid noise triggering
         if self.heating:
-            # Increase vacuum -> look for minimum pressure or maximum delta
-            # We treat delta peaks: when heating, delta should be rising; track max
-            if delta > self.peak:
-                self.peak = delta
+            # Increasing vacuum -> track max delta
+            if (self.delta_filt - self.peak) > self.peak_deadband or self.peak == 0.0:
+                self.peak = self.delta_filt
                 self.peak_time = read_time
         else:
-            # Fan off -> delta falls; track min (use negative for uniformity)
-            if self.peak == 0.0 or delta < self.peak:
-                self.peak = delta
+            # Decreasing vacuum -> track min delta
+            if (self.peak - self.delta_filt) > self.peak_deadband or self.peak == 0.0:
+                self.peak = self.delta_filt
                 self.peak_time = read_time
 
-        # Command fan
+        # Command fan directly
         speed = self.pfan.max_speed if self.heating else 0.0
         if speed != self.last_speed:
             self.last_speed = speed
@@ -385,11 +434,8 @@ class ControlAutoTune:
     def _check_peaks(self):
         # Record last peak and reset tracker
         self.peaks.append((self.peak, self.peak_time))
-        # Reset peak sentinel based on new state
-        if self.heating:
-            self.peak = 0.0
-        else:
-            self.peak = 0.0
+        # Reset peak tracker
+        self.peak = 0.0
         if len(self.peaks) >= 4:
             self._calc_pid(len(self.peaks) - 1)
 
@@ -413,7 +459,7 @@ class ControlAutoTune:
         return Kp, Ki, Kd
 
     def calc_final_pid(self):
-        if len(self.peaks) < 6:
+        if len(self.peaks) < 2 * self.min_cycles:
             return 0.0, 0.0, 0.0
         cycle_times = [(self.peaks[pos][1] - self.peaks[pos-2][1], pos)
                        for pos in range(4, len(self.peaks))]
@@ -421,8 +467,20 @@ class ControlAutoTune:
         return self._calc_pid(midpoint_pos)
 
     def check_busy(self):
-        # Wait for sufficient peaks
-        return len(self.peaks) < 12
+        # Continue until we have enough peaks, but also honor max_cycles and max_time
+        if self.start_time and (self.peaks and len(self.peaks) >= 2 * self.max_cycles):
+            return False
+        now_cycles = len(self.peaks) // 2
+        if now_cycles < self.min_cycles:
+            # Not enough data yet
+            return True
+        # Enough cycles, but keep going if under max_cycles and under max_time to stabilize
+        if self.start_time:
+            elapsed = self.peaks[-1][1] - self.start_time
+            if elapsed >= self.max_time:
+                return False
+        # If we have at least min_cycles, allow finish once next peak arrives
+        return now_cycles < self.max_cycles
 
     # Optional logging
     def write_file(self, filename):
