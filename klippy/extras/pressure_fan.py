@@ -12,6 +12,10 @@ DEFAULT_TARGET_DELTA_PA = 15.0  # target vacuum relative to baseline in Pascals
 PID_PARAM_BASE = 255.0
 
 
+DEFAULT_MIN_TEMP = -40.0
+DEFAULT_MAX_TEMP = 85.0
+
+
 class PressureFan:
     def __init__(self, config):
         # Basics
@@ -21,10 +25,16 @@ class PressureFan:
 
         # Fan output (standard fan config keys apply: pin, cycle_time, etc.)
         self.fan = fan.Fan(config, default_shutdown_speed=0.0)
-
-        # Sensor reference (e.g. "bme280 my_sensor")
-        self.sensor_ref = config.get('sensor')
-        self.sensor_obj = None
+        # Sensor setup (reuse Klipper heaters sensor pattern)
+        # Expect sensor_type and its settings (e.g., BME280 + I2C) within this section
+        pheaters = self.printer.load_object(config, 'heaters')
+        self.min_temp = config.getfloat('min_temp', DEFAULT_MIN_TEMP)
+        self.max_temp = config.getfloat('max_temp', DEFAULT_MAX_TEMP, above=self.min_temp)
+        self.sensor_obj = pheaters.setup_sensor(config)
+        self.sensor_obj.setup_minmax(self.min_temp, self.max_temp)
+        # Register a no-op callback to keep periodic scheduling similar to other sensors
+        self.sensor_obj.setup_callback(self._sensor_callback)
+        pheaters.register_sensor(config, self)
 
         # Control limits
         self.max_speed_conf = config.getfloat('max_speed', 1.0, above=0.0, maxval=1.0)
@@ -69,13 +79,6 @@ class PressureFan:
 
     # Event handlers
     def _on_connect(self):
-        # Resolve sensor object now that modules are loaded
-        try:
-            self.sensor_obj = self.printer.lookup_object(self.sensor_ref)
-        except Exception:
-            raise self.printer.config_error(
-                "pressure_fan %s: Unknown sensor '%s' (expected like 'bme280 my_sensor')"
-                % (self.name, self.sensor_ref))
         # Use sensor report period if available
         try:
             self.sample_period = float(self.sensor_obj.get_report_time_delta())
@@ -96,11 +99,14 @@ class PressureFan:
             logging.info("pressure_fan %s: Baseline set to %.2f Pa", self.name, p)
         return self.reactor.NEVER
 
+    def _sensor_callback(self, read_time, temp):
+        # We rely on our own timer loop; callback retained for completeness
+        pass
+
     # Core operations
     def _read_pressure(self):
         try:
-            # BME280/BMP280 extras expose .pressure in hPa? bme280 reports Pa/100 in code -> self.pressure is in hPa.
-            # In bme280.py, pressure is set to compensated / 100. => hPa. Convert to Pa here.
+            # BME280/BMP280 extras expose .pressure in hPa; convert to Pa
             p_hpa = getattr(self.sensor_obj, 'pressure', None)
             if p_hpa is None:
                 return None

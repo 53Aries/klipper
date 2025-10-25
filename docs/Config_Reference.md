@@ -3363,9 +3363,18 @@ See the command reference for additional information.
 #tachometer_poll_interval:
 #enable_pin:
 #   See the "fan" section for a description of the above parameters.
-sensor:
-#   Reference to a pressure-capable sensor object. For BMP/BME280 use the
-#   section name in the form "bme280 <name>". Example: sensor: bme280 my_sensor
+#sensor_type:
+#i2c_address:
+#i2c_mcu:
+#i2c_bus:
+#i2c_software_scl_pin:
+#i2c_software_sda_pin:
+#i2c_speed:
+#   Provide a pressure-capable I2C sensor here (e.g., sensor_type: BME280).
+#   See the common I2C settings and the BME280 sensor docs for details.
+#min_temp: -40.0
+#max_temp: 85.0
+#   Safety range for the sensor's onboard temperature reading.
 #control: pid
 #   Control algorithm: 'pid' or 'watermark' (bang-bang). Default is 'pid'.
 #pid_Kp:
