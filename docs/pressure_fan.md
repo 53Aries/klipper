@@ -22,6 +22,9 @@ pin: <your_fan_pin>
 # Optional PWM tuning
 # cycle_time: 0.010
 # hardware_pwm: False
+off_below: 0.20         # many fans won't spin below ~20%
+kick_start_time: 0.5    # give a brief full-speed kick to start rotation
+start_full_speed: true  # when a positive target is set, start at 100% then step down
 
 # Control mode (step|pid|watermark). Recommended: step
 control: step
@@ -62,6 +65,12 @@ Notes:
 - Place the sensor in the enclosure and ensure it’s not directly in the exhaust jet.
 - Capture a baseline when the enclosure is at rest: `SET_PRESSURE_BASELINE PRESSURE_FAN=exhaust`.
 - Then set a target vacuum (for example 10 Pa): `SET_PRESSURE_FAN_TARGET PRESSURE_FAN=exhaust TARGET_DELTA=10`.
+
+Troubleshooting first run:
+- The step controller adjusts slowly (default: ±0.05 every 60s) and many fans won’t start at 5% duty. To verify wiring quickly, try:
+  - `SET_PRESSURE_FAN_TARGET PRESSURE_FAN=exhaust TARGET_DELTA=20 MIN_SPEED=0.25`
+  - Or temporarily reduce `decision_period` and/or increase `step_speed` in the config, then restart.
+- Ensure a baseline is set (auto or via `SET_PRESSURE_BASELINE`). If baseline isn’t set, the controller won’t act.
 
 ## G-code commands
 

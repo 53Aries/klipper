@@ -62,9 +62,11 @@ class PressureFan:
         self.sample_window_sec = config.getfloat('sample_window_sec', 60.0, above=5.0)
         self.drop_outliers = config.getint('drop_outliers', 1, minval=0)
         self._delta_samples = deque()  # (eventtime, delta)
+        # Startup behavior: optionally start at full speed when a positive target is set
+        self.start_full_speed = config.getboolean('start_full_speed', True)
         # Optional control deadband to ignore tiny errors without adding lag
         self.control_deadband = config.getfloat('control_deadband', 0.0, minval=0.0)
-    # (filtering controls removed for simplicity)
+        # (filtering controls removed for simplicity)
 
         # GCODES
         gcode = self.printer.lookup_object('gcode')
@@ -227,6 +229,7 @@ class PressureFan:
     )
     def cmd_SET_PRESSURE_FAN_TARGET(self, gcmd):
         target = gcmd.get_float('TARGET_DELTA', self.target_delta_conf)
+        prev_target = self.target_delta
         self.target_delta = target
         min_speed = gcmd.get_float('MIN_SPEED', self.min_speed)
         max_speed = gcmd.get_float('MAX_SPEED', self.max_speed)
@@ -235,6 +238,14 @@ class PressureFan:
                 "Requested min speed (%.2f) is greater than max speed (%.2f)" % (min_speed, max_speed))
         self.min_speed = min_speed
         self.max_speed = max_speed
+        # If we just enabled control (target moved from <=0 to >0), start at full speed
+        if self.start_full_speed and prev_target <= 0.0 and self.target_delta > 0.0:
+            try:
+                eventtime = self.reactor.monotonic()
+                read_time = self.fan.get_mcu().estimated_print_time(eventtime)
+                self.set_pf_speed(read_time, self.max_speed)
+            except Exception:
+                logging.exception("pressure_fan %s: failed to start at full speed", self.name)
 
     cmd_SET_PRESSURE_BASELINE_help = (
         "Set or capture baseline pressure (absolute Pa). "
