@@ -87,6 +87,13 @@ class PressureDeltaSensor:
 
 
 def load_config(config):
-    # Register sensor
+    # Register sensor (support both upper and lower case keys)
     pheaters = config.get_printer().load_object(config, 'heaters')
-    pheaters.add_sensor_factory('PRESSURE_DELTA', PressureDeltaSensor)
+    try:
+        pheaters.add_sensor_factory('PRESSURE_DELTA', PressureDeltaSensor)
+    except Exception:
+        pass
+    try:
+        pheaters.add_sensor_factory('pressure_delta', PressureDeltaSensor)
+    except Exception:
+        pass

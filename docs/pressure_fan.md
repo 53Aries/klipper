@@ -117,7 +117,7 @@ You can graph the current pressure delta (Pa) directly on the Temperatures panel
 
 ```
 [temperature_sensor delta_pa]
-sensor_type: PRESSURE_DELTA
+sensor_type: pressure_delta   # or PRESSURE_DELTA
 pressure_fan: exhaust       # name of your [pressure_fan]
 mode: window                # window|raw
 scale: 1.0                  # multiply (e.g., 0.1 to show deci-Pa)
