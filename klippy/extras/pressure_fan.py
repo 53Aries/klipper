@@ -255,13 +255,22 @@ class PressureFan:
             self.set_control(old_control)
         if write_file:
             calibrate.write_file('/tmp/pressure_tune.txt')
+        cycles, elapsed, reason = calibrate.get_summary()
         Kp, Ki, Kd = calibrate.calc_final_pid()
         if Kp == 0.0 and Ki == 0.0 and Kd == 0.0:
-            raise self.printer.command_error("PRESSURE_PID_CALIBRATE: insufficient data collected")
-        logging.info("Pressure PID Autotune final: Kp=%.3f Ki=%.3f Kd=%.3f", Kp, Ki, Kd)
+            msg = ("PRESSURE_PID_CALIBRATE finished (%s, cycles=%d, elapsed=%.1fs) "
+                   "but insufficient data collected. Try increasing MAX_TIME or MIN_CYCLES, "
+                   "or adjust BAND_PA/PEAK_DEADBAND/SETTLE_SEC for clearer oscillations.")
+            gcmd.respond_info(msg % (reason or 'stopped', cycles, elapsed))
+            logging.info("Pressure PID Autotune finished without sufficient data: reason=%s cycles=%d elapsed=%.1fs",
+                         reason, cycles, elapsed)
+            return
+        logging.info("Pressure PID Autotune final: Kp=%.3f Ki=%.3f Kd=%.3f (cycles=%d elapsed=%.1fs)",
+                     Kp, Ki, Kd, cycles, elapsed)
         gcmd.respond_info(
-            "PID parameters: pid_Kp=%.3f pid_Ki=%.3f pid_Kd=%.3f\n"
-            "Use SAVE_CONFIG to persist these in your config." % (Kp, Ki, Kd))
+            ("PID parameters: pid_Kp=%.3f pid_Ki=%.3f pid_Kd=%.3f\n"
+             "Collected cycles: %d, elapsed: %.1fs. Use SAVE_CONFIG to persist these in your config.")
+            % (Kp, Ki, Kd, cycles, elapsed))
         # Store results for SAVE_CONFIG
         configfile = self.printer.lookup_object('configfile')
         configfile.set(self.section, 'control', 'pid')
@@ -381,6 +390,8 @@ class ControlAutoTune:
         self.peaks = []
         self.last_speed = -1.0
         self.start_time = 0.0
+        self.done = False
+        self.done_reason = ""
 
     def _maybe_init(self, read_time, delta):
         if self.start_time == 0.0:
@@ -463,12 +474,16 @@ class ControlAutoTune:
             return 0.0, 0.0, 0.0
         cycle_times = [(self.peaks[pos][1] - self.peaks[pos-2][1], pos)
                        for pos in range(4, len(self.peaks))]
+        if not cycle_times:
+            return 0.0, 0.0, 0.0
         midpoint_pos = sorted(cycle_times)[len(cycle_times)//2][1]
         return self._calc_pid(midpoint_pos)
 
     def check_busy(self):
         # Continue until we have enough peaks, but also honor max_cycles and max_time
         if self.start_time and (self.peaks and len(self.peaks) >= 2 * self.max_cycles):
+            self.done = True
+            self.done_reason = "reached max cycles"
             return False
         now_cycles = len(self.peaks) // 2
         if now_cycles < self.min_cycles:
@@ -478,9 +493,22 @@ class ControlAutoTune:
         if self.start_time:
             elapsed = self.peaks[-1][1] - self.start_time
             if elapsed >= self.max_time:
+                self.done = True
+                self.done_reason = "reached max time"
                 return False
         # If we have at least min_cycles, allow finish once next peak arrives
-        return now_cycles < self.max_cycles
+        if now_cycles < self.max_cycles:
+            return True
+        self.done = True
+        self.done_reason = "completed cycles"
+        return False
+
+    def get_summary(self):
+        cycles = len(self.peaks) // 2
+        elapsed = 0.0
+        if self.start_time and self.peaks:
+            elapsed = max(0.0, self.peaks[-1][1] - self.start_time)
+        return cycles, elapsed, (self.done_reason or "")
 
     # Optional logging
     def write_file(self, filename):
