@@ -50,16 +50,18 @@ class PressureFan:
         self.target_delta = self.target_delta_conf
         self.baseline_pressure = config.getfloat('baseline_pressure', None)
         self.auto_set_baseline = config.getboolean('auto_set_baseline', False)
-
         # Control algorithm
-        algos = {'watermark': ControlBangBang, 'pid': ControlPID}
+        algos = {'watermark': ControlBangBang, 'pid': ControlPID, 'step': ControlStepwise}
         algo = config.getchoice('control', algos, default='pid')
         self.control = algo(self, config)
-
         # Timing
         self.sample_period = REPORT_TIME
         self.next_speed_time = 0.0
         self.last_speed_value = -1.0
+        # Slow-window sampling for simple, robust control
+        self.sample_window_sec = config.getfloat('sample_window_sec', 60.0, above=5.0)
+        self.drop_outliers = config.getint('drop_outliers', 1, minval=0)
+        self._delta_samples = deque()  # (eventtime, delta)
         # Optional filtering of delta for control (not for reporting)
         self.delta_filter_alpha = config.getfloat('delta_filter_alpha', 0.0, minval=0.0, maxval=1.0)
         self.delta_prefilter = config.getchoice('delta_prefilter',
@@ -181,12 +183,48 @@ class PressureFan:
         if self.baseline_pressure is None:
             # No baseline yet; do nothing until operator sets it
             return eventtime + self.sample_period
+        # Maintain window of raw delta samples for robust averaging
+        raw_delta = self.baseline_pressure - p
+        self._append_delta_sample(eventtime, raw_delta)
         # Update control
         # Convert reactor time to the fan MCU's print_time domain
         fan_mcu = self.fan.get_mcu()
         read_time = fan_mcu.estimated_print_time(eventtime)
         self.control.pressure_callback(read_time, p)
         return eventtime + self.sample_period
+
+    # Sampling helpers for robust window average
+    def _append_delta_sample(self, eventtime, delta):
+        try:
+            self._delta_samples.append((float(eventtime), float(delta)))
+            # prune old
+            cutoff = float(eventtime) - float(self.sample_window_sec)
+            while self._delta_samples and self._delta_samples[0][0] < cutoff:
+                self._delta_samples.popleft()
+        except Exception:
+            pass
+
+    def get_window_delta(self):
+        """Return (avg_delta, count) over the window after dropping outliers.
+        Returns (None, 0) if not enough samples.
+        """
+        now = self.reactor.monotonic()
+        cutoff = now - float(self.sample_window_sec)
+        # prune
+        while self._delta_samples and self._delta_samples[0][0] < cutoff:
+            self._delta_samples.popleft()
+        vals = [d for (t, d) in self._delta_samples if t >= cutoff]
+        n = len(vals)
+        k = min(self.drop_outliers, n // 3)  # avoid dropping all
+        min_needed = max(3, 2 * k + 3)
+        if n < min_needed:
+            return None, n
+        vals.sort()
+        trimmed = vals[k:n - k] if k > 0 else vals
+        if not trimmed:
+            return None, n
+        avg = sum(trimmed) / float(len(trimmed))
+        return avg, n
 
     # External getters used by controllers
     def get_limits(self):
@@ -267,14 +305,26 @@ class PressureFan:
         if p is None:
             gcmd.respond_info("pressure_fan %s: No reading yet (baseline=%s)" % (self.name, base))
             return
+        # Also report a windowed average if available (for slow-step control visibility)
+        win_avg, win_n = self.get_window_delta()
         if self.delta_filter_alpha > 0.0 and filt_delta is not None:
             gcmd.respond_info(
-                "pressure_fan %s: P=%.2f Pa, baseline=%.2f Pa, delta=%.2f Pa (filtered=%.2f Pa), target=%.2f Pa, speed=%.2f"
-                % (self.name, p, base, raw_delta, filt_delta, self.target_delta, speed))
+                "pressure_fan %s: P=%.2f Pa, baseline=%.2f Pa, delta=%.2f Pa (filtered=%.2f Pa)%s, target=%.2f Pa, speed=%.2f"
+                % (
+                    self.name, p, base, raw_delta, filt_delta,
+                    (", window=%.2f Pa (n=%d)" % (win_avg, win_n)) if win_avg is not None else "",
+                    self.target_delta, speed,
+                )
+            )
         else:
             gcmd.respond_info(
-                "pressure_fan %s: P=%.2f Pa, baseline=%.2f Pa, delta=%.2f Pa, target=%.2f Pa, speed=%.2f"
-                % (self.name, p, base, raw_delta, self.target_delta, speed))
+                "pressure_fan %s: P=%.2f Pa, baseline=%.2f Pa, delta=%.2f Pa%s, target=%.2f Pa, speed=%.2f"
+                % (
+                    self.name, p, base, raw_delta,
+                    (", window=%.2f Pa (n=%d)" % (win_avg, win_n)) if win_avg is not None else "",
+                    self.target_delta, speed,
+                )
+            )
 
     # Runtime filter control
     cmd_SET_PRESSURE_FILTER_help = (
@@ -542,6 +592,40 @@ class PressureFan:
 ######################################################################
 # Control algorithms
 ######################################################################
+
+class ControlStepwise:
+    """Simple slow step controller.
+    Once per decision_period, compute a robust window-averaged delta and
+    nudge the fan speed up or down by step_speed if outside a band around
+    the target. Keeps behavior responsive enough without complex filters.
+    """
+    def __init__(self, pressure_fan, config):
+        self.pfan = pressure_fan
+        self.band_pa = config.getfloat('band_pa', 0.5, above=0.0)
+        self.step_speed = config.getfloat('step_speed', 0.05, above=0.0)
+        self.decision_period = config.getfloat('decision_period', 60.0, above=1.0)
+        self._last_decision = 0.0
+
+    def pressure_callback(self, read_time, pressure_pa):
+        # Only decide at the requested cadence and once we have enough samples
+        now = self.pfan.reactor.monotonic()
+        if (now - self._last_decision) < self.decision_period:
+            return
+        avg, n = self.pfan.get_window_delta()
+        if avg is None:
+            return
+        target = self.pfan.get_target_delta()
+        err = target - avg
+        # Hold within band (and when target is 0 the fan logic will shut it off)
+        if abs(err) <= self.band_pa:
+            self._last_decision = now
+            return
+        cur = max(0.0, self.pfan.last_speed_value)
+        new = cur + (self.step_speed if err > 0.0 else -self.step_speed)
+        min_spd, max_spd = self.pfan.get_limits()
+        new = max(0.0, min(max_spd, new))
+        self.pfan.set_pf_speed(read_time, max(min_spd, new))
+        self._last_decision = now
 
 class ControlBangBang:
     def __init__(self, pressure_fan, config):
