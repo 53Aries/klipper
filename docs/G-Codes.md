@@ -1532,6 +1532,21 @@ is enabled in the config (or changed at runtime), the report includes the
 filtered delta used by the controller.
 
 #### PRESSURE_PID_CALIBRATE
+- `PRESSURE_FILTER_CALIBRATE PRESSURE_FAN=<name> [START=<0..1>] [END=<0..1>] [STEP=<0..1>]
+  [DURATION=<sec>] [SETTLE_SEC=<sec>] [TARGET_STD=<Pa>] [WRITE_FILE=1] [WRITE_CONFIG=1]`:
+  Sweeps the control-side EMA smoothing factor (`delta_filter_alpha`) with the
+  fan off and measures the standard deviation of the filtered delta (Pa). It
+  selects the smallest alpha that achieves `TARGET_STD` (default 0.5 Pa);
+  if none meet the target, it selects the alpha with the lowest filtered std.
+  Use `WRITE_CONFIG=1` and then `SAVE_CONFIG` to persist the chosen alpha.
+  `WRITE_FILE=1` writes a results table to `/tmp/pressure_filter_tune.txt`.
+  Defaults: START=0.0 END=0.8 STEP=0.1 DURATION=10 SETTLE_SEC=2.
+
+- `SET_PRESSURE_FILTER PRESSURE_FAN=<name> ALPHA=<0.0-1.0>`: Sets the control-side
+  EMA smoothing factor used on the pressure delta (0=no smoothing, 1=full).
+  This does not affect the raw values shown in queries unless the filtered
+  delta is included (see QUERY above). Use this to tune smoothing live without
+  restarting Klipper.
 - `SET_PRESSURE_FILTER PRESSURE_FAN=<name> ALPHA=<0.0-1.0>`: Sets the control-side
   EMA smoothing factor used on the pressure delta (0=no smoothing, 1=full).
   This does not affect the raw values shown in queries unless the filtered

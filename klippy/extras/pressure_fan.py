@@ -87,6 +87,11 @@ class PressureFan:
             'PRESSURE_PID_CALIBRATE', 'PRESSURE_FAN', self.name,
             self.cmd_PRESSURE_PID_CALIBRATE,
             desc=self.cmd_PRESSURE_PID_CALIBRATE_help)
+        # Filter autotune command
+        gcode.register_mux_command(
+            'PRESSURE_FILTER_CALIBRATE', 'PRESSURE_FAN', self.name,
+            self.cmd_PRESSURE_FILTER_CALIBRATE,
+            desc=self.cmd_PRESSURE_FILTER_CALIBRATE_help)
 
         # Connect/ready hooks
         self.printer.register_event_handler('klippy:connect', self._on_connect)
@@ -330,6 +335,121 @@ class PressureFan:
             'target_delta': self.target_delta,
             'fan': self.fan.get_status(eventtime),
         }
+
+    ######################################################################
+    # Filter calibration (EMA alpha sweep)
+    ######################################################################
+    cmd_PRESSURE_FILTER_CALIBRATE_help = (
+        "Calibrate delta_filter_alpha by sweeping ALPHA and measuring noise. "
+        "Options: START=<0..1> END=<0..1> STEP=<0..1> DURATION=<sec> SETTLE_SEC=<sec> "
+        "TARGET_STD=<Pa> [WRITE_FILE=1] [WRITE_CONFIG=1]"
+    )
+    def cmd_PRESSURE_FILTER_CALIBRATE(self, gcmd):
+        start = gcmd.get_float('START', 0.0, minval=0.0, maxval=1.0)
+        end = gcmd.get_float('END', 0.8, minval=0.0, maxval=1.0)
+        step = gcmd.get_float('STEP', 0.1, minval=0.01, maxval=1.0)
+        duration = gcmd.get_float('DURATION', 10.0, above=0.5)
+        settle_sec = gcmd.get_float('SETTLE_SEC', 2.0, minval=0.0)
+        target_std = gcmd.get_float('TARGET_STD', 0.5, above=0.0)
+        write_file = gcmd.get_int('WRITE_FILE', 0)
+        write_config = gcmd.get_int('WRITE_CONFIG', 0)
+
+        # Require baseline to compute delta
+        if self.baseline_pressure is None:
+            raise self.printer.command_error(
+                "PRESSURE_FILTER_CALIBRATE: baseline not set. Run SET_PRESSURE_BASELINE first.")
+
+        # Force fan off during calibration
+        old_target = self.target_delta
+        old_alpha = self.delta_filter_alpha
+        self.alter_target_delta(0.0)
+
+        # Build alpha list
+        if end < start:
+            start, end = end, start
+        alphas = []
+        a = start
+        while a <= end + 1e-9:
+            alphas.append(round(a, 3))
+            a += step
+
+        reactor = self.printer.get_reactor()
+        eventtime = reactor.monotonic()
+
+        results = []  # (alpha, count, mean_raw, std_raw, mean_filt, std_filt)
+        # Helper for Welford
+        def welford_step(state, x):
+            (n, mean, M2) = state
+            n += 1
+            delta = x - mean
+            mean += delta / n
+            M2 += delta * (x - mean)
+            return (n, mean, M2)
+
+        try:
+            for alpha in alphas:
+                # Set alpha and reset EMA
+                self.delta_filter_alpha = alpha
+                self._delta_ema = None
+                # settle
+                settle_end = eventtime + settle_sec
+                while eventtime < settle_end and not self.printer.is_shutdown():
+                    eventtime = reactor.pause(eventtime + self.sample_period)
+                # measure
+                end_time = eventtime + duration
+                raw_state = (0, 0.0, 0.0)
+                filt_state = (0, 0.0, 0.0)
+                while eventtime < end_time and not self.printer.is_shutdown():
+                    # Use sensor-driven filter path
+                    _, _, raw_delta = self.get_current_delta()
+                    _, _, filt_delta = self.get_pressure()
+                    if raw_delta is not None:
+                        raw_state = welford_step(raw_state, raw_delta)
+                    if filt_delta is not None:
+                        filt_state = welford_step(filt_state, filt_delta)
+                    eventtime = reactor.pause(eventtime + self.sample_period)
+                rn, rmean, rM2 = raw_state
+                fn, fmean, fM2 = filt_state
+                rstd = (0.0 if rn < 2 else (rM2 / (rn - 1)) ** 0.5)
+                fstd = (0.0 if fn < 2 else (fM2 / (fn - 1)) ** 0.5)
+                results.append((alpha, rn, rmean, rstd, fmean, fstd))
+                gcmd.respond_info(
+                    ("FILTER_CAL: alpha=%.2f raw_std=%.2fPa filt_std=%.2fPa (n=%d)")
+                    % (alpha, rstd, fstd, fn))
+        finally:
+            # Choose best alpha: minimal alpha that meets target std, else lowest std
+            chosen = None
+            meeting = [r for r in results if r[5] <= target_std and r[1] >= 5]
+            if meeting:
+                chosen = sorted(meeting, key=lambda r: r[0])[0]
+            elif results:
+                chosen = sorted(results, key=lambda r: r[5])[0]
+            # Restore target and set chosen alpha
+            if chosen is not None:
+                self.delta_filter_alpha = chosen[0]
+                self._delta_ema = None
+                gcmd.respond_info(
+                    ("FILTER_CAL: chosen alpha=%.2f (filt_std=%.2fPa target=%.2fPa)")
+                    % (chosen[0], chosen[5], target_std))
+                if write_config:
+                    configfile = self.printer.lookup_object('configfile')
+                    configfile.set(self.section, 'delta_filter_alpha', "%.3f" % (chosen[0],))
+                    gcmd.respond_info("Use SAVE_CONFIG to persist delta_filter_alpha")
+            else:
+                # Restore original on failure
+                self.delta_filter_alpha = old_alpha
+                self._delta_ema = None
+                gcmd.respond_info("FILTER_CAL: no data collected; leaving alpha unchanged")
+            # Always restore the user's target after calibration
+            self.alter_target_delta(old_target)
+
+        if write_file and results:
+            try:
+                with open('/tmp/pressure_filter_tune.txt', 'w') as f:
+                    for (alpha, rn, rmean, rstd, fmean, fstd) in results:
+                        f.write(f"{alpha:.3f} {rn} {rmean:.3f} {rstd:.3f} {fmean:.3f} {fstd:.3f}\n")
+            except Exception:
+                logging.exception("pressure_fan %s: failed writing filter tune file", self.name)
 
 
 ######################################################################

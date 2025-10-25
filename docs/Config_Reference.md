@@ -3410,6 +3410,8 @@ See the command reference for additional information.
 #   pressure delta for control purposes (not used for reporting). Use a value
 #   like 0.3-0.6 to reduce jitter when the fan is off or at low speed. Default
 #   is 0.0 (no filtering).
+#   Tip: Run PRESSURE_FILTER_CALIBRATE to measure ambient noise and pick a
+#   suitable value automatically.
 ```
 
 ### [fan_generic]
