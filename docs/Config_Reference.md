@@ -3405,6 +3405,11 @@ See the command reference for additional information.
 #max_speed: 1.0
 #min_speed: 0.0
 #   Fan speed bounds for the controller (0.0-1.0).
+#delta_filter_alpha: 0.0
+#   Optional exponential smoothing factor (0.0-1.0) applied to the measured
+#   pressure delta for control purposes (not used for reporting). Use a value
+#   like 0.3-0.6 to reduce jitter when the fan is off or at low speed. Default
+#   is 0.0 (no filtering).
 ```
 
 ### [fan_generic]

@@ -59,6 +59,9 @@ class PressureFan:
         self.sample_period = REPORT_TIME
         self.next_speed_time = 0.0
         self.last_speed_value = -1.0
+        # Optional filtering of delta for control (not for reporting)
+        self.delta_filter_alpha = config.getfloat('delta_filter_alpha', 0.0, minval=0.0, maxval=1.0)
+        self._delta_ema = None
 
         # GCODES
         gcode = self.printer.lookup_object('gcode')
@@ -168,8 +171,19 @@ class PressureFan:
     def get_target_delta(self):
         return self.target_delta
     def get_pressure(self):
-        # returns (current_pressure_Pa, baseline_Pa, current_delta_Pa)
-        return self.get_current_delta()
+        # returns (current_pressure_Pa, baseline_Pa, delta_for_control_Pa)
+        p, base, delta = self.get_current_delta()
+        if delta is None:
+            return p, base, None
+        # Apply optional EMA filtering for control only
+        if self.delta_filter_alpha > 0.0:
+            if self._delta_ema is None:
+                self._delta_ema = delta
+            else:
+                a = self.delta_filter_alpha
+                self._delta_ema = a * delta + (1.0 - a) * self._delta_ema
+            delta = self._delta_ema
+        return p, base, delta
     def alter_target_delta(self, value):
         self.target_delta = value
     def set_control(self, control):
