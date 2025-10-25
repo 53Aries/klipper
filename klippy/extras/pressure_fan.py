@@ -147,7 +147,10 @@ class PressureFan:
             # No baseline yet; do nothing until operator sets it
             return eventtime + self.sample_period
         # Update control
-        self.control.pressure_callback(eventtime, p)
+        # Convert reactor time to the fan MCU's print_time domain
+        fan_mcu = self.fan.get_mcu()
+        read_time = fan_mcu.estimated_print_time(eventtime)
+        self.control.pressure_callback(read_time, p)
         return eventtime + self.sample_period
 
     # External getters used by controllers
