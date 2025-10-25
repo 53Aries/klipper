@@ -30,24 +30,10 @@ class PressureFan:
         #   fan: <existing_fan_name>
         # Option B: specify pin/cycle_time/etc. directly in this section
         ref_fan_name = config.get('fan', None)
+        self._ref_fan_name = ref_fan_name
         if ref_fan_name:
-            found = None
-            for prefix in ('fan ', 'fan_generic ', 'heater_fan ', 'controller_fan ', 'temperature_fan '):
-                try:
-                    found = self.printer.lookup_object(prefix + ref_fan_name)
-                    if found is not None:
-                        break
-                except Exception:
-                    continue
-            if found is None:
-                raise config.error("pressure_fan %s: referenced fan '%s' not found (tried fan, fan_generic, heater_fan, controller_fan, temperature_fan)" % (self.name, ref_fan_name))
-            # Unwrap common wrappers to obtain the underlying Fan interface
-            if hasattr(found, 'set_speed') and hasattr(found, 'get_mcu'):
-                self.fan = found
-            elif hasattr(found, 'fan') and hasattr(found.fan, 'set_speed'):
-                self.fan = found.fan
-            else:
-                raise config.error("pressure_fan %s: referenced fan '%s' does not expose a compatible Fan interface" % (self.name, ref_fan_name))
+            # Defer resolution until klippy:ready so all fan objects exist
+            self.fan = None
         else:
             # Create a dedicated fan driven by this module
             self.fan = fan.Fan(config, default_shutdown_speed=0.0)
@@ -126,6 +112,13 @@ class PressureFan:
             self.sample_period = REPORT_TIME
 
     def _on_ready(self):
+        # If using external fan reference, resolve it now
+        if self.fan is None and self._ref_fan_name:
+            self.fan = self._resolve_fan_ref(self._ref_fan_name)
+            if self.fan is None:
+                logging.error("pressure_fan %s: referenced fan '%s' not found; control disabled",
+                              self.name, self._ref_fan_name)
+                return
         # Optionally set baseline at ready
         if self.baseline_pressure is None and self.auto_set_baseline:
             self.reactor.register_timer(self._deferred_baseline, self.reactor.NOW + 1.0)
@@ -142,6 +135,24 @@ class PressureFan:
     def _sensor_callback(self, read_time, temp):
         # We rely on our own timer loop; callback retained for completeness
         pass
+
+    def _resolve_fan_ref(self, name):
+        found = None
+        for prefix in ('fan ', 'fan_generic ', 'heater_fan ', 'controller_fan ', 'temperature_fan '):
+            try:
+                found = self.printer.lookup_object(prefix + name)
+                if found is not None:
+                    break
+            except Exception:
+                continue
+        if found is None:
+            return None
+        # Unwrap wrappers exposing underlying Fan
+        if hasattr(found, 'set_speed') and hasattr(found, 'get_mcu'):
+            return found
+        if hasattr(found, 'fan') and hasattr(found.fan, 'set_speed'):
+            return found.fan
+        return None
 
     # Core operations
     def _read_pressure(self):
@@ -166,6 +177,8 @@ class PressureFan:
         # Bound
         if self.target_delta <= 0.0:
             value = 0.0
+        if self.fan is None:
+            return
         if value <= 0.0:
             value = 0.0
         elif value < self.min_speed:
@@ -193,6 +206,8 @@ class PressureFan:
         self._append_delta_sample(eventtime, raw_delta)
         # Update control
         # Convert reactor time to the fan MCU's print_time domain
+        if self.fan is None:
+            return eventtime + self.sample_period
         fan_mcu = self.fan.get_mcu()
         read_time = fan_mcu.estimated_print_time(eventtime)
         self.control.pressure_callback(read_time, p)
