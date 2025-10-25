@@ -54,6 +54,9 @@ step_speed: 0.05           # speed nudge per decision
 # Baseline handling
 # Set at runtime (recommended) or auto-capture at ready
 # auto_set_baseline: true
+# Capture uses the same robust window as control (trimmed mean of last `sample_window_sec`).
+# You can require a minimum number of samples before capture:
+# baseline_min_samples: 10
 # Optionally auto-track baseline when fan is off and target=0 (helps counter ambient drift)
 # auto_track_baseline: true
 # baseline_track_period: 60.0         # seconds between adjustments when idle
@@ -89,6 +92,7 @@ Troubleshooting first run:
   - `SET_PRESSURE_FAN_TARGET PRESSURE_FAN=exhaust TARGET_DELTA=20 MIN_SPEED=0.25`
   - Or temporarily reduce `decision_period` and/or increase `step_speed` in the config, then restart.
 - Ensure a baseline is set (auto or via `SET_PRESSURE_BASELINE`). If baseline isn’t set, the controller won’t act.
+  - When BASELINE is omitted, the module prefers a robust window average of raw pressure (trimmed mean) if there are at least `baseline_min_samples`; otherwise it falls back to an instantaneous reading.
 
 If delta climbs with the fan off:
 - That typically means ambient pressure or enclosure temperature is drifting relative to the earlier baseline. With the fan off and `TARGET_DELTA=0`, run `SET_PRESSURE_BASELINE PRESSURE_FAN=exhaust` to resync, or enable `auto_track_baseline: true` so the baseline slowly follows the current pressure when idle.

@@ -82,6 +82,8 @@ class PressureFan:
         self.sample_window_sec = config.getfloat('sample_window_sec', 60.0, above=5.0)
         self.drop_outliers = config.getint('drop_outliers', 1, minval=0)
         self._delta_samples = deque()  # (eventtime, delta)
+        self._p_samples = deque()      # (eventtime, pressure_Pa) for baseline calc
+        self.baseline_min_samples = config.getint('baseline_min_samples', 10, minval=0)
         # Startup behavior: optionally start at full speed when a positive target is set
         self.start_full_speed = config.getboolean('start_full_speed', True)
         # Optional control deadband to ignore tiny errors without adding lag
@@ -139,11 +141,24 @@ class PressureFan:
             self._next_track_time = self.reactor.monotonic() + self.baseline_track_period
 
     def _deferred_baseline(self, eventtime):
-        p = self._read_pressure()
-        if p is not None:
-            self.baseline_pressure = p
-            logging.info("pressure_fan %s: Baseline set to %.2f Pa", self.name, p)
-        return self.reactor.NEVER
+        # Prefer robust windowed average of raw pressures if enough samples exist
+        p_avg, n = self.get_window_pressure()
+        if p_avg is not None and n >= self.baseline_min_samples:
+            self.baseline_pressure = float(p_avg)
+            self._delta_samples.clear()
+            logging.info("pressure_fan %s: Baseline set to %.2f Pa (window avg, n=%d)",
+                         self.name, self.baseline_pressure, n)
+            return self.reactor.NEVER
+        # Fallback to instantaneous read if allowed by min_samples
+        if self.baseline_min_samples <= 0:
+            p = self._read_pressure()
+            if p is not None:
+                self.baseline_pressure = float(p)
+                self._delta_samples.clear()
+                logging.info("pressure_fan %s: Baseline set to %.2f Pa (instant)", self.name, p)
+                return self.reactor.NEVER
+        # Not enough data yet; try again after one sample interval
+        return eventtime + max(self.sample_period, 0.5)
 
     def _sensor_callback(self, read_time, temp):
         # We rely on our own timer loop; callback retained for completeness
@@ -210,6 +225,8 @@ class PressureFan:
         p = self._read_pressure()
         if p is None:
             return eventtime + self.sample_period
+        # Record raw pressure for baseline robust calculations
+        self._append_pressure_sample(eventtime, p)
         # Determine baseline
         if self.baseline_pressure is None:
             # No baseline yet; do nothing until operator sets it
@@ -248,6 +265,15 @@ class PressureFan:
         except Exception:
             pass
 
+    def _append_pressure_sample(self, eventtime, pressure_pa):
+        try:
+            self._p_samples.append((float(eventtime), float(pressure_pa)))
+            cutoff = float(eventtime) - float(self.sample_window_sec)
+            while self._p_samples and self._p_samples[0][0] < cutoff:
+                self._p_samples.popleft()
+        except Exception:
+            pass
+
     def get_window_delta(self):
         """Return (avg_delta, count) over the window after dropping outliers.
         Returns (None, 0) if not enough samples.
@@ -260,6 +286,27 @@ class PressureFan:
         vals = [d for (t, d) in self._delta_samples if t >= cutoff]
         n = len(vals)
         k = min(self.drop_outliers, n // 3)  # avoid dropping all
+        min_needed = max(3, 2 * k + 3)
+        if n < min_needed:
+            return None, n
+        vals.sort()
+        trimmed = vals[k:n - k] if k > 0 else vals
+        if not trimmed:
+            return None, n
+        avg = sum(trimmed) / float(len(trimmed))
+        return avg, n
+
+    def get_window_pressure(self):
+        """Return (avg_pressure, count) robust trimmed-mean over window.
+        Independent of baseline for accurate baseline capture.
+        """
+        now = self.reactor.monotonic()
+        cutoff = now - float(self.sample_window_sec)
+        while self._p_samples and self._p_samples[0][0] < cutoff:
+            self._p_samples.popleft()
+        vals = [p for (t, p) in self._p_samples if t >= cutoff]
+        n = len(vals)
+        k = min(self.drop_outliers, n // 3)
         min_needed = max(3, 2 * k + 3)
         if n < min_needed:
             return None, n
@@ -316,12 +363,24 @@ class PressureFan:
     )
     def cmd_SET_PRESSURE_BASELINE(self, gcmd):
         if gcmd.get('BASELINE', None) is None:
+            # Prefer windowed average of raw pressures (robust to transients)
+            p_avg, n = self.get_window_pressure()
+            if p_avg is not None and n >= self.baseline_min_samples:
+                self.baseline_pressure = float(p_avg)
+                self._delta_samples.clear()
+                gcmd.respond_info("pressure_fan %s: Baseline set to %.2f Pa (window avg, n=%d)"
+                                  % (self.name, self.baseline_pressure, n))
+                return
+            # Fallback to instantaneous reading
             p = self._read_pressure()
             if p is None:
                 raise self.printer.command_error("No pressure reading available to capture baseline")
-            self.baseline_pressure = p
+            self.baseline_pressure = float(p)
+            self._delta_samples.clear()
+            gcmd.respond_info("pressure_fan %s: Baseline set to %.2f Pa (instant)" % (self.name, p))
         else:
             self.baseline_pressure = gcmd.get_float('BASELINE')
+            self._delta_samples.clear()
 
     cmd_QUERY_PRESSURE_FAN_help = "Report current pressure, baseline, delta, windowed average, target, and fan speed"
     def cmd_QUERY_PRESSURE_FAN(self, gcmd):
