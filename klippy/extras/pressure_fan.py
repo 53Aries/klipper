@@ -185,11 +185,15 @@ class PressureFan:
     # Core operations
     def _read_pressure(self):
         try:
-            # BME280/BMP280 extras expose .pressure in hPa; convert to Pa
+            # Prefer direct Pascals if sensor provides it
+            p_pa = getattr(self.sensor_obj, 'pressure_pa', None)
+            if p_pa is not None:
+                return float(p_pa)
+            # Fallback: many sensors expose .pressure in hPa; convert to Pa
             p_hpa = getattr(self.sensor_obj, 'pressure', None)
-            if p_hpa is None:
-                return None
-            return float(p_hpa) * 100.0
+            if p_hpa is not None:
+                return float(p_hpa) * 100.0
+            return None
         except Exception:
             logging.exception("pressure_fan %s: Failed reading pressure", self.name)
             return None
