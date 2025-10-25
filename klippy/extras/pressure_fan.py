@@ -31,10 +31,23 @@ class PressureFan:
         # Option B: specify pin/cycle_time/etc. directly in this section
         ref_fan_name = config.get('fan', None)
         if ref_fan_name:
-            try:
-                self.fan = self.printer.lookup_object('fan ' + ref_fan_name)
-            except Exception:
-                raise config.error("pressure_fan %s: referenced fan '%s' not found" % (self.name, ref_fan_name))
+            found = None
+            for prefix in ('fan ', 'fan_generic ', 'heater_fan ', 'controller_fan ', 'temperature_fan '):
+                try:
+                    found = self.printer.lookup_object(prefix + ref_fan_name)
+                    if found is not None:
+                        break
+                except Exception:
+                    continue
+            if found is None:
+                raise config.error("pressure_fan %s: referenced fan '%s' not found (tried fan, fan_generic, heater_fan, controller_fan, temperature_fan)" % (self.name, ref_fan_name))
+            # Unwrap common wrappers to obtain the underlying Fan interface
+            if hasattr(found, 'set_speed') and hasattr(found, 'get_mcu'):
+                self.fan = found
+            elif hasattr(found, 'fan') and hasattr(found.fan, 'set_speed'):
+                self.fan = found.fan
+            else:
+                raise config.error("pressure_fan %s: referenced fan '%s' does not expose a compatible Fan interface" % (self.name, ref_fan_name))
         else:
             # Create a dedicated fan driven by this module
             self.fan = fan.Fan(config, default_shutdown_speed=0.0)

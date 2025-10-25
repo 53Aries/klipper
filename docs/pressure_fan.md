@@ -20,6 +20,9 @@ Tip: For stable behavior with slow, low-noise decisions, prefer high pressure ov
 # Fan wiring
 # Option A: Use an existing fan so UI shows a slider/percent (recommended)
 fan: exhaust                 # references [fan_generic exhaust] below
+# Notes:
+# - Works with [fan], [fan_generic], [heater_fan], [controller_fan], [temperature_fan]
+# - The name after the section must match (e.g., [fan_generic exhaust] → fan: exhaust)
 # Option B: control the pin directly in this section (omit 'fan:' and set pin)
 # pin: <your_fan_pin>
 # Optional PWM tuning
