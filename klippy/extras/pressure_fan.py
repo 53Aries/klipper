@@ -4,6 +4,7 @@
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import logging
+from collections import deque
 from . import fan
 
 # Defaults
@@ -61,7 +62,12 @@ class PressureFan:
         self.last_speed_value = -1.0
         # Optional filtering of delta for control (not for reporting)
         self.delta_filter_alpha = config.getfloat('delta_filter_alpha', 0.0, minval=0.0, maxval=1.0)
+        self.delta_prefilter = config.getchoice('delta_prefilter',
+                                                {'none': 'none', 'median3': 'median3', 'avg': 'avg'},
+                                                default='none')
+        self.delta_avg_window = config.getint('delta_avg_window', 5, minval=1)
         self._delta_ema = None
+        self._delta_window = deque(maxlen=max(3, self.delta_avg_window))
 
         # GCODES
         gcode = self.printer.lookup_object('gcode')
@@ -185,14 +191,28 @@ class PressureFan:
         p, base, delta = self.get_current_delta()
         if delta is None:
             return p, base, None
+        # Optional pre-filtering (median3 or moving average) before EMA
+        pre = delta
+        if self.delta_prefilter == 'median3':
+            self._delta_window.append(delta)
+            if len(self._delta_window) >= 3:
+                a, b, c = list(self._delta_window)[-3:]
+                pre = sorted((a, b, c))[1]
+        elif self.delta_prefilter == 'avg':
+            self._delta_window.append(delta)
+            if len(self._delta_window) >= 2:
+                pre = sum(self._delta_window) / len(self._delta_window)
+
         # Apply optional EMA filtering for control only
         if self.delta_filter_alpha > 0.0:
             if self._delta_ema is None:
-                self._delta_ema = delta
+                self._delta_ema = pre
             else:
                 a = self.delta_filter_alpha
-                self._delta_ema = a * delta + (1.0 - a) * self._delta_ema
+                self._delta_ema = a * pre + (1.0 - a) * self._delta_ema
             delta = self._delta_ema
+        else:
+            delta = pre
         return p, base, delta
     def alter_target_delta(self, value):
         self.target_delta = value
@@ -251,8 +271,8 @@ class PressureFan:
 
     # Runtime filter control
     cmd_SET_PRESSURE_FILTER_help = (
-        "Set the control-side delta EMA. Provide ALPHA=<0..1> or TAU_S=<seconds>. "
-        "Example: SET_PRESSURE_FILTER PRESSURE_FAN=%s ALPHA=0.4 or TAU_S=2.0" % ('%s')
+        "Set delta filter: ALPHA=<0..1> or TAU_S=<seconds>; optional prefilter MEDIAN=3 or AVG=<N>. "
+        "Example: SET_PRESSURE_FILTER PRESSURE_FAN=%s TAU_S=3.0 MEDIAN=3" % ('%s')
     )
     def cmd_SET_PRESSURE_FILTER(self, gcmd):
         tau_s = gcmd.get_float('TAU_S', None)
@@ -265,7 +285,19 @@ class PressureFan:
         # Reset EMA on change to avoid bias from previous alpha
         self.delta_filter_alpha = alpha
         self._delta_ema = None
-        gcmd.respond_info("pressure_fan %s: delta_filter_alpha set to %.3f" % (self.name, alpha))
+        # Optional prefilter controls
+        if gcmd.get('MEDIAN', None) is not None:
+            self.delta_prefilter = 'median3'
+            self._delta_window = deque(maxlen=max(3, self.delta_avg_window))
+        if gcmd.get('AVG', None) is not None:
+            self.delta_prefilter = 'avg'
+            self.delta_avg_window = max(1, int(gcmd.get_float('AVG')))
+            self._delta_window = deque(maxlen=max(3, self.delta_avg_window))
+        if gcmd.get('MEDIAN', None) is None and gcmd.get('AVG', None) is None and gcmd.get('ALPHA', None) is None and tau_s is None:
+            # If no params given, just report current settings
+            pass
+        gcmd.respond_info("pressure_fan %s: filter alpha=%.3f, prefilter=%s(window=%d)" % (
+            self.name, self.delta_filter_alpha, self.delta_prefilter, self._delta_window.maxlen))
 
     # PID Autotune G-Code
     cmd_PRESSURE_PID_CALIBRATE_help = (

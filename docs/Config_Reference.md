@@ -3412,6 +3412,13 @@ See the command reference for additional information.
 #   is 0.0 (no filtering).
 #   Tip: Run PRESSURE_FILTER_CALIBRATE to measure ambient noise and pick a
 #   suitable value automatically.
+#delta_prefilter: none
+#   Optional pre-filter applied before EMA: 'none', 'median3', or 'avg'.
+#   'median3' uses a 3-sample median to reject outliers. 'avg' uses a moving
+#   average of the last N samples (see delta_avg_window).
+#delta_avg_window: 5
+#   Window size for the 'avg' pre-filter. Minimum is 1. Only used if
+#   delta_prefilter: avg.
 ```
 
 ### [fan_generic]

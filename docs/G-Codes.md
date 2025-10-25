@@ -1546,9 +1546,10 @@ filtered delta used by the controller.
   DURATION=10 SETTLE_SEC=2. Using `TAU_*`, a range like `TAU_START=0.0 TAU_END=5.0 TAU_STEP=0.5`
   is typical. Alpha is computed from tau via `alpha = dt / (tau + dt)`.
 
-- `SET_PRESSURE_FILTER PRESSURE_FAN=<name> ALPHA=<0.0-1.0> | TAU_S=<sec>`: Sets the control-side
-  EMA smoothing factor on the pressure delta. You may specify either a direct
-  `ALPHA` or a smoothing time-constant `TAU_S` in seconds (`alpha = dt/(tau+dt)`).
+- `SET_PRESSURE_FILTER PRESSURE_FAN=<name> ALPHA=<0.0-1.0> | TAU_S=<sec> [MEDIAN=3 | AVG=<N>]`:
+  Sets the control-side smoothing on the pressure delta. Provide either a direct
+  `ALPHA` or a time-constant `TAU_S` in seconds (`alpha = dt/(tau+dt)`). Optionally
+  add a prefilter: `MEDIAN=3` (3-sample median) or `AVG=<N>` (moving average window).
   This does not affect the raw values shown in queries unless the filtered delta
   is included (see QUERY above). Use this to tune smoothing live without restarting Klipper.
 `PRESSURE_PID_CALIBRATE PRESSURE_FAN=<name> TARGET_DELTA=<Pa> [WRITE_FILE=1]
