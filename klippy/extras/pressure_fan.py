@@ -66,6 +66,8 @@ class PressureFan:
                                                 {'none': 'none', 'median3': 'median3', 'avg': 'avg'},
                                                 default='none')
         self.delta_avg_window = config.getint('delta_avg_window', 5, minval=1)
+        # Optional control deadband to ignore tiny errors without adding lag
+        self.control_deadband = config.getfloat('control_deadband', 0.0, minval=0.0)
         self._delta_ema = None
         self._delta_window = deque(maxlen=max(3, self.delta_avg_window))
 
@@ -98,6 +100,11 @@ class PressureFan:
             'PRESSURE_FILTER_CALIBRATE', 'PRESSURE_FAN', self.name,
             self.cmd_PRESSURE_FILTER_CALIBRATE,
             desc=self.cmd_PRESSURE_FILTER_CALIBRATE_help)
+        # Runtime control deadband adjustment
+        gcode.register_mux_command(
+            'SET_PRESSURE_DEADBAND', 'PRESSURE_FAN', self.name,
+            self.cmd_SET_PRESSURE_DEADBAND,
+            desc=self.cmd_SET_PRESSURE_DEADBAND_help)
 
         # Connect/ready hooks
         self.printer.register_event_handler('klippy:connect', self._on_connect)
@@ -360,6 +367,17 @@ class PressureFan:
         configfile.set(self.section, 'pid_Ki', "%.3f" % (Ki,))
         configfile.set(self.section, 'pid_Kd', "%.3f" % (Kd,))
 
+    # Control deadband runtime setter
+    cmd_SET_PRESSURE_DEADBAND_help = (
+        "Set a control deadband in Pascals; errors within ±DEADBAND are ignored by PID. "
+        "Example: SET_PRESSURE_DEADBAND PRESSURE_FAN=%s DEADBAND=0.5" % ('%s')
+    )
+    def cmd_SET_PRESSURE_DEADBAND(self, gcmd):
+        db = gcmd.get_float('DEADBAND', None)
+        if db is not None:
+            self.control_deadband = max(0.0, float(db))
+        gcmd.respond_info("pressure_fan %s: control_deadband=%.3f Pa" % (self.name, self.control_deadband))
+
     # Status
     def get_status(self, eventtime):
         p, base, delta = self.get_current_delta()
@@ -566,6 +584,13 @@ class ControlPID:
             return
         target = self.pfan.get_target_delta()
         err = target - delta  # positive => increase vacuum (more fan)
+        # Apply deadband: ignore tiny errors to avoid dithering
+        db = getattr(self.pfan, 'control_deadband', 0.0)
+        if db > 0.0:
+            if abs(err) <= db:
+                err = 0.0
+            else:
+                err = err - db if err > 0.0 else err + db
         dt = read_time - self.prev_time
         # Derivative
         derr = err - self.prev_err
