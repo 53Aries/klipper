@@ -3339,6 +3339,60 @@ information.
 #   given id. The default is to not report the temperature via M105.
 ```
 
+### [pressure_fan]
+
+Pressure-controlled exhaust fans (one may define any number of sections with a
+"pressure_fan" prefix). A pressure_fan modulates a fan to maintain a slight
+negative pressure (vacuum) in an enclosed chamber using a pressure sensor such
+as BMP280/BME280 connected over I2C. By default, a pressure_fan has a
+shutdown_speed of 0.0.
+
+See the command reference for additional information.
+
+```
+[pressure_fan chamber_vacuum]
+#pin:
+#max_power:
+#shutdown_speed:
+#cycle_time:
+#hardware_pwm:
+#kick_start_time:
+#off_below:
+#tachometer_pin:
+#tachometer_ppr:
+#tachometer_poll_interval:
+#enable_pin:
+#   See the "fan" section for a description of the above parameters.
+sensor:
+#   Reference to a pressure-capable sensor object. For BMP/BME280 use the
+#   section name in the form "bme280 <name>". Example: sensor: bme280 my_sensor
+#control: pid
+#   Control algorithm: 'pid' or 'watermark' (bang-bang). Default is 'pid'.
+#pid_Kp:
+#pid_Ki:
+#pid_Kd:
+#   PID parameters when control='pid'. Values use the same scaling as
+#   temperature_fan (divide by 255 internally). Example starting point:
+#   pid_Kp: 10, pid_Ki: 0.5, pid_Kd: 20
+#pid_deriv_time: 2.0
+#   Derivative smoothing window (seconds). Default is 2.0.
+#max_delta: 3.0
+#   Deadband for watermark control (Pa). Only used with control='watermark'.
+#target_delta: 15.0
+#   Target vacuum in Pascals relative to baseline (positive means chamber
+#   pressure lower than baseline). Default is 15 Pa.
+#baseline_pressure:
+#   Absolute baseline pressure in Pascals. If not set, the baseline can be
+#   captured at runtime with SET_PRESSURE_BASELINE, or automatically if
+#   auto_set_baseline: true.
+#auto_set_baseline: false
+#   If true and baseline_pressure is not set, capture the current sensor
+#   reading at startup (READY) as baseline. Default is false.
+#max_speed: 1.0
+#min_speed: 0.0
+#   Fan speed bounds for the controller (0.0-1.0).
+```
+
 ### [fan_generic]
 
 Manually controlled fan (one may define any number of sections with a

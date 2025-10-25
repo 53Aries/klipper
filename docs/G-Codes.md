@@ -1508,6 +1508,27 @@ temperature_fan. If a target is not supplied, it is set to the
 specified temperature in the config file. If speeds are not supplied,
 no change is applied.
 
+### [pressure_fan]
+
+The following commands are available when a
+[pressure_fan config section](Config_Reference.md#pressure_fan)
+is enabled.
+
+#### SET_PRESSURE_FAN_TARGET
+`SET_PRESSURE_FAN_TARGET PRESSURE_FAN=<name> [TARGET_DELTA=<Pa>] [MIN_SPEED=<0.0-1.0>] [MAX_SPEED=<0.0-1.0>]`:
+Sets the target vacuum (delta relative to baseline, in Pascals) for the
+pressure_fan and optionally the fan speed bounds. If parameters are omitted
+the values from the config file are used.
+
+#### SET_PRESSURE_BASELINE
+`SET_PRESSURE_BASELINE PRESSURE_FAN=<name> [BASELINE=<Pa>]`:
+Sets the absolute baseline pressure in Pascals. If BASELINE is omitted, the
+current sensor reading is captured and used as the baseline.
+
+#### QUERY_PRESSURE_FAN
+`QUERY_PRESSURE_FAN PRESSURE_FAN=<name>`: Reports the current pressure,
+baseline, measured delta, target delta, and fan speed.
+
 ### [temperature_probe]
 
 The following commands are available when a

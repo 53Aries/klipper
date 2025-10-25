@@ -515,6 +515,17 @@ objects:
 - `temperature`: The last read temperature from the sensor.
 - `target`: The target temperature for the fan.
 
+## pressure_fan
+
+The following information is available in
+[pressure_fan some_name](Config_Reference.md#pressure_fan)
+objects:
+- `pressure`: The last read absolute pressure in Pascals.
+- `baseline`: The current baseline pressure in Pascals.
+- `delta`: The measured vacuum relative to baseline (Pa).
+- `target_delta`: The target vacuum (Pa).
+- `fan`: Nested fan status as in other fan objects (speed, rpm, etc.).
+
 ## temperature_sensor
 
 The following information is available in
