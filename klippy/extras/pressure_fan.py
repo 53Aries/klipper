@@ -65,6 +65,11 @@ class PressureFan:
         self.target_delta = self.target_delta_conf
         self.baseline_pressure = config.getfloat('baseline_pressure', None)
         self.auto_set_baseline = config.getboolean('auto_set_baseline', False)
+        # Optional auto-tracking of baseline when control is idle/off
+        self.auto_track_baseline = config.getboolean('auto_track_baseline', False)
+        self.baseline_track_period = config.getfloat('baseline_track_period', 60.0, above=5.0)
+        self.baseline_track_deadband = config.getfloat('baseline_track_deadband', 0.2, minval=0.0)
+        self._next_track_time = 0.0
         # Control algorithm
         algos = {'watermark': ControlBangBang, 'pid': ControlPID, 'step': ControlStepwise}
         algo = config.getchoice('control', algos, default='pid')
@@ -129,6 +134,9 @@ class PressureFan:
             self.reactor.register_timer(self._deferred_baseline, self.reactor.NOW + 1.0)
         # Start control loop
         self.reactor.register_timer(self._control_timer, self.reactor.NOW + self.sample_period)
+        # Initialize baseline tracking timer
+        if self.auto_track_baseline:
+            self._next_track_time = self.reactor.monotonic() + self.baseline_track_period
 
     def _deferred_baseline(self, eventtime):
         p = self._read_pressure()
@@ -209,6 +217,17 @@ class PressureFan:
         # Maintain window of raw delta samples for robust averaging
         raw_delta = self.baseline_pressure - p
         self._append_delta_sample(eventtime, raw_delta)
+        # When idle (target <= 0 and fan off), optionally track baseline to current
+        if self.auto_track_baseline and self.target_delta <= 0.0:
+            last = max(0.0, self.last_speed_value)
+            if last <= 0.0 and eventtime >= self._next_track_time:
+                avg, n = self.get_window_delta()
+                if avg is not None and abs(avg) > self.baseline_track_deadband:
+                    # avg = baseline - mean(p_recent) -> align baseline to recent mean
+                    self.baseline_pressure = float(self.baseline_pressure) - float(avg)
+                    logging.debug("pressure_fan %s: auto-tracked baseline by %+0.2f Pa -> %0.2f Pa",
+                                  self.name, -avg, self.baseline_pressure)
+                self._next_track_time = eventtime + self.baseline_track_period
         # Update control
         # Convert reactor time to the fan MCU's print_time domain
         if self.fan is None:
@@ -302,13 +321,7 @@ class PressureFan:
                 raise self.printer.command_error("No pressure reading available to capture baseline")
             self.baseline_pressure = p
         else:
-            val = gcmd.get_float('BASELINE')
-            # Heuristic: if a value looks like hPa (e.g., 949.7), convert to Pa
-            if val < 2000.0:
-                logging.info("pressure_fan %s: converting baseline from hPa to Pa (%.3f -> %.1f)",
-                             self.name, val, val * 100.0)
-                val *= 100.0
-            self.baseline_pressure = val
+            self.baseline_pressure = gcmd.get_float('BASELINE')
 
     cmd_QUERY_PRESSURE_FAN_help = "Report current pressure, baseline, delta, windowed average, target, and fan speed"
     def cmd_QUERY_PRESSURE_FAN(self, gcmd):
