@@ -77,6 +77,11 @@ class PressureFan:
             'QUERY_PRESSURE_FAN', 'PRESSURE_FAN', self.name,
             self.cmd_QUERY_PRESSURE_FAN,
             desc=self.cmd_QUERY_PRESSURE_FAN_help)
+        # Runtime filter control
+        gcode.register_mux_command(
+            'SET_PRESSURE_FILTER', 'PRESSURE_FAN', self.name,
+            self.cmd_SET_PRESSURE_FILTER,
+            desc=self.cmd_SET_PRESSURE_FILTER_help)
         # PID autotune command
         gcode.register_mux_command(
             'PRESSURE_PID_CALIBRATE', 'PRESSURE_FAN', self.name,
@@ -220,16 +225,36 @@ class PressureFan:
         else:
             self.baseline_pressure = gcmd.get_float('BASELINE')
 
-    cmd_QUERY_PRESSURE_FAN_help = "Report current pressure, baseline, delta, target, and fan speed"
+    cmd_QUERY_PRESSURE_FAN_help = "Report current pressure, baseline, delta (and filtered if enabled), target, and fan speed"
     def cmd_QUERY_PRESSURE_FAN(self, gcmd):
-        p, base, delta = self.get_current_delta()
+        # Raw values for visibility
+        p, base, raw_delta = self.get_current_delta()
+        # Filtered value used by control
+        _, _, filt_delta = self.get_pressure()
         speed = max(0.0, self.last_speed_value)
         if p is None:
             gcmd.respond_info("pressure_fan %s: No reading yet (baseline=%s)" % (self.name, base))
             return
-        gcmd.respond_info(
-            "pressure_fan %s: P=%.2f Pa, baseline=%.2f Pa, delta=%.2f Pa, target=%.2f Pa, speed=%.2f"
-            % (self.name, p, base, delta, self.target_delta, speed))
+        if self.delta_filter_alpha > 0.0 and filt_delta is not None:
+            gcmd.respond_info(
+                "pressure_fan %s: P=%.2f Pa, baseline=%.2f Pa, delta=%.2f Pa (filtered=%.2f Pa), target=%.2f Pa, speed=%.2f"
+                % (self.name, p, base, raw_delta, filt_delta, self.target_delta, speed))
+        else:
+            gcmd.respond_info(
+                "pressure_fan %s: P=%.2f Pa, baseline=%.2f Pa, delta=%.2f Pa, target=%.2f Pa, speed=%.2f"
+                % (self.name, p, base, raw_delta, self.target_delta, speed))
+
+    # Runtime filter control
+    cmd_SET_PRESSURE_FILTER_help = (
+        "Set the control-side delta EMA smoothing factor (0.0-1.0). "
+        "Example: SET_PRESSURE_FILTER PRESSURE_FAN=%s ALPHA=0.4" % ('%s')
+    )
+    def cmd_SET_PRESSURE_FILTER(self, gcmd):
+        alpha = gcmd.get_float('ALPHA', minval=0.0, maxval=1.0)
+        # Reset EMA on change to avoid bias from previous alpha
+        self.delta_filter_alpha = alpha
+        self._delta_ema = None
+        gcmd.respond_info("pressure_fan %s: delta_filter_alpha set to %.3f" % (self.name, alpha))
 
     # PID Autotune G-Code
     cmd_PRESSURE_PID_CALIBRATE_help = (
@@ -295,10 +320,13 @@ class PressureFan:
     # Status
     def get_status(self, eventtime):
         p, base, delta = self.get_current_delta()
+        # Filtered value used by control
+        _, _, filt_delta = self.get_pressure()
         return {
             'pressure': None if p is None else round(p, 2),
             'baseline': base,
             'delta': None if delta is None else round(delta, 2),
+            'delta_filtered': None if filt_delta is None else round(filt_delta, 2),
             'target_delta': self.target_delta,
             'fan': self.fan.get_status(eventtime),
         }

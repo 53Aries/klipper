@@ -1527,9 +1527,16 @@ current sensor reading is captured and used as the baseline.
 
 #### QUERY_PRESSURE_FAN
 `QUERY_PRESSURE_FAN PRESSURE_FAN=<name>`: Reports the current pressure,
-baseline, measured delta, target delta, and fan speed.
+baseline, measured delta, target delta, and fan speed. If `delta_filter_alpha`
+is enabled in the config (or changed at runtime), the report includes the
+filtered delta used by the controller.
 
 #### PRESSURE_PID_CALIBRATE
+- `SET_PRESSURE_FILTER PRESSURE_FAN=<name> ALPHA=<0.0-1.0>`: Sets the control-side
+  EMA smoothing factor used on the pressure delta (0=no smoothing, 1=full).
+  This does not affect the raw values shown in queries unless the filtered
+  delta is included (see QUERY above). Use this to tune smoothing live without
+  restarting Klipper.
 `PRESSURE_PID_CALIBRATE PRESSURE_FAN=<name> TARGET_DELTA=<Pa> [WRITE_FILE=1]
  [BAND_PA=<Pa>] [MIN_CYCLES=<n>] [MAX_CYCLES=<n>] [MAX_TIME=<sec>]
  [SETTLE_SEC=<sec>] [FILTER_ALPHA=<0..1>] [PEAK_DEADBAND=<Pa>]`:

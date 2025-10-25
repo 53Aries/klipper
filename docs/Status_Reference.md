@@ -522,7 +522,10 @@ The following information is available in
 objects:
 - `pressure`: The last read absolute pressure in Pascals.
 - `baseline`: The current baseline pressure in Pascals.
-- `delta`: The measured vacuum relative to baseline (Pa).
+- `delta`: The measured vacuum relative to baseline (Pa). This is the raw
+  (unfiltered) delta reading.
+- `delta_filtered`: The filtered delta used by the controller when
+  `delta_filter_alpha` > 0.0 (else `null`).
 - `target_delta`: The target vacuum (Pa).
 - `fan`: Nested fan status as in other fan objects (speed, rpm, etc.).
 
