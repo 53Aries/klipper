@@ -111,3 +111,19 @@ Troubleshooting first run:
 - Start with a small `band_pa` (0.5–1.0 Pa) and small `step_speed` (0.03–0.07) for gentle adjustments.
 - If the enclosure is very leaky or fan is coarse, increase `decision_period` and `step_speed` slightly.
 
+## Show delta on the Temperatures panel (optional)
+
+You can graph the current pressure delta (Pa) directly on the Temperatures panel by adding a virtual temperature sensor that reports the delta value (displayed in °C but numerically equal to Pa):
+
+```
+[temperature_sensor delta_pa]
+sensor_type: PRESSURE_DELTA
+pressure_fan: exhaust       # name of your [pressure_fan]
+mode: window                # window|raw
+scale: 1.0                  # multiply (e.g., 0.1 to show deci-Pa)
+offset: 0.0                 # add offset if desired
+report_time: 0.8
+```
+
+After a restart, “delta_pa” will appear in the Temperatures list; the number is in Pa (units shown by the UI will be °C).
+

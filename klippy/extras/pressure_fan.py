@@ -47,6 +47,11 @@ class PressureFan:
         # Register a no-op callback to keep periodic scheduling similar to other sensors
         self.sensor_obj.setup_callback(self._sensor_callback)
         pheaters.register_sensor(config, self)
+        # Expose this object for other modules (e.g., pressure_delta sensor)
+        try:
+            self.printer.add_object('pressure_fan ' + self.name, self)
+        except Exception:
+            pass
 
         # Control limits
         self.max_speed_conf = config.getfloat('max_speed', 1.0, above=0.0, maxval=1.0)
