@@ -251,11 +251,17 @@ class PressureFan:
 
     # Runtime filter control
     cmd_SET_PRESSURE_FILTER_help = (
-        "Set the control-side delta EMA smoothing factor (0.0-1.0). "
-        "Example: SET_PRESSURE_FILTER PRESSURE_FAN=%s ALPHA=0.4" % ('%s')
+        "Set the control-side delta EMA. Provide ALPHA=<0..1> or TAU_S=<seconds>. "
+        "Example: SET_PRESSURE_FILTER PRESSURE_FAN=%s ALPHA=0.4 or TAU_S=2.0" % ('%s')
     )
     def cmd_SET_PRESSURE_FILTER(self, gcmd):
-        alpha = gcmd.get_float('ALPHA', minval=0.0, maxval=1.0)
+        tau_s = gcmd.get_float('TAU_S', None)
+        if tau_s is not None:
+            dt = max(1e-3, float(self.sample_period))
+            alpha = dt / (tau_s + dt)
+            alpha = max(0.0, min(1.0, alpha))
+        else:
+            alpha = gcmd.get_float('ALPHA', minval=0.0, maxval=1.0)
         # Reset EMA on change to avoid bias from previous alpha
         self.delta_filter_alpha = alpha
         self._delta_ema = None
@@ -340,14 +346,17 @@ class PressureFan:
     # Filter calibration (EMA alpha sweep)
     ######################################################################
     cmd_PRESSURE_FILTER_CALIBRATE_help = (
-        "Calibrate delta_filter_alpha by sweeping ALPHA and measuring noise. "
-        "Options: START=<0..1> END=<0..1> STEP=<0..1> DURATION=<sec> SETTLE_SEC=<sec> "
-        "TARGET_STD=<Pa> [WRITE_FILE=1] [WRITE_CONFIG=1]"
+        "Calibrate delta_filter_alpha by sweeping ALPHA or a time-constant TAU. "
+        "Options: START=<0..1> END=<0..1> STEP=<0..1> or TAU_START=<s> TAU_END=<s> TAU_STEP=<s>; "
+        "DURATION=<sec> SETTLE_SEC=<sec> TARGET_STD=<Pa> [WRITE_FILE=1] [WRITE_CONFIG=1]"
     )
     def cmd_PRESSURE_FILTER_CALIBRATE(self, gcmd):
-        start = gcmd.get_float('START', 0.0, minval=0.0, maxval=1.0)
-        end = gcmd.get_float('END', 0.8, minval=0.0, maxval=1.0)
-        step = gcmd.get_float('STEP', 0.1, minval=0.01, maxval=1.0)
+        start = gcmd.get_float('START', None)
+        end = gcmd.get_float('END', None)
+        step = gcmd.get_float('STEP', None)
+        tau_start = gcmd.get_float('TAU_START', None)
+        tau_end = gcmd.get_float('TAU_END', None)
+        tau_step = gcmd.get_float('TAU_STEP', None)
         duration = gcmd.get_float('DURATION', 10.0, above=0.5)
         settle_sec = gcmd.get_float('SETTLE_SEC', 2.0, minval=0.0)
         target_std = gcmd.get_float('TARGET_STD', 0.5, above=0.0)
@@ -364,14 +373,39 @@ class PressureFan:
         old_alpha = self.delta_filter_alpha
         self.alter_target_delta(0.0)
 
-        # Build alpha list
-        if end < start:
-            start, end = end, start
+        # Build alpha list (either via direct ALPHA sweep or TAU seconds)
+        dt = max(1e-3, float(self.sample_period))
         alphas = []
-        a = start
-        while a <= end + 1e-9:
-            alphas.append(round(a, 3))
-            a += step
+        if tau_end is not None or tau_start is not None or tau_step is not None:
+            # TAU mode defaults
+            if tau_start is None:
+                tau_start = 0.0
+            if tau_end is None:
+                tau_end = 5.0
+            if tau_step is None:
+                tau_step = 0.5
+            if tau_end < tau_start:
+                tau_start, tau_end = tau_end, tau_start
+            t = float(tau_start)
+            while t <= tau_end + 1e-9:
+                a = dt / (t + dt)
+                a = max(0.0, min(1.0, a))
+                alphas.append((round(a, 3), round(t, 3)))
+                t += float(tau_step)
+        else:
+            # ALPHA mode defaults
+            if start is None:
+                start = 0.0
+            if end is None:
+                end = 0.8
+            if step is None:
+                step = 0.1
+            if end < start:
+                start, end = end, start
+            a = float(start)
+            while a <= end + 1e-9:
+                alphas.append((round(a, 3), None))
+                a += float(step)
 
         reactor = self.printer.get_reactor()
         eventtime = reactor.monotonic()
@@ -387,7 +421,7 @@ class PressureFan:
             return (n, mean, M2)
 
         try:
-            for alpha in alphas:
+            for alpha, tau in alphas:
                 # Set alpha and reset EMA
                 self.delta_filter_alpha = alpha
                 self._delta_ema = None
@@ -412,10 +446,11 @@ class PressureFan:
                 fn, fmean, fM2 = filt_state
                 rstd = (0.0 if rn < 2 else (rM2 / (rn - 1)) ** 0.5)
                 fstd = (0.0 if fn < 2 else (fM2 / (fn - 1)) ** 0.5)
-                results.append((alpha, rn, rmean, rstd, fmean, fstd))
+                results.append((alpha, rn, rmean, rstd, fmean, fstd, tau))
                 gcmd.respond_info(
-                    ("FILTER_CAL: alpha=%.2f raw_std=%.2fPa filt_std=%.2fPa (n=%d)")
-                    % (alpha, rstd, fstd, fn))
+                    ("FILTER_CAL: alpha=%.2f%s raw_std=%.2fPa filt_std=%.2fPa (n=%d)")
+                    % (alpha, (" tau=%.2fs" % tau) if tau is not None else "",
+                       rstd, fstd, fn))
         finally:
             # Choose best alpha: minimal alpha that meets target std, else lowest std
             chosen = None
@@ -446,8 +481,10 @@ class PressureFan:
         if write_file and results:
             try:
                 with open('/tmp/pressure_filter_tune.txt', 'w') as f:
-                    for (alpha, rn, rmean, rstd, fmean, fstd) in results:
-                        f.write(f"{alpha:.3f} {rn} {rmean:.3f} {rstd:.3f} {fmean:.3f} {fstd:.3f}\n")
+                    for (alpha, rn, rmean, rstd, fmean, fstd, tau) in results:
+                        if tau is None:
+                            tau = (dt * (1.0 - alpha) / alpha) if alpha > 0.0 else 9999.0
+                        f.write(f"{alpha:.3f} {tau:.3f} {rn} {rmean:.3f} {rstd:.3f} {fmean:.3f} {fstd:.3f}\n")
             except Exception:
                 logging.exception("pressure_fan %s: failed writing filter tune file", self.name)
 

@@ -1532,26 +1532,25 @@ is enabled in the config (or changed at runtime), the report includes the
 filtered delta used by the controller.
 
 #### PRESSURE_PID_CALIBRATE
-- `PRESSURE_FILTER_CALIBRATE PRESSURE_FAN=<name> [START=<0..1>] [END=<0..1>] [STEP=<0..1>]
+- `PRESSURE_FILTER_CALIBRATE PRESSURE_FAN=<name>
+  [START=<0..1>] [END=<0..1>] [STEP=<0..1>]
+  [TAU_START=<sec>] [TAU_END=<sec>] [TAU_STEP=<sec>]
   [DURATION=<sec>] [SETTLE_SEC=<sec>] [TARGET_STD=<Pa>] [WRITE_FILE=1] [WRITE_CONFIG=1]`:
-  Sweeps the control-side EMA smoothing factor (`delta_filter_alpha`) with the
-  fan off and measures the standard deviation of the filtered delta (Pa). It
-  selects the smallest alpha that achieves `TARGET_STD` (default 0.5 Pa);
-  if none meet the target, it selects the alpha with the lowest filtered std.
-  Use `WRITE_CONFIG=1` and then `SAVE_CONFIG` to persist the chosen alpha.
-  `WRITE_FILE=1` writes a results table to `/tmp/pressure_filter_tune.txt`.
-  Defaults: START=0.0 END=0.8 STEP=0.1 DURATION=10 SETTLE_SEC=2.
+  Sweeps the control-side smoothing either by EMA alpha (`START/END/STEP`) or by
+  time constant in seconds (`TAU_*`), with the fan off, and measures the standard
+  deviation of the filtered delta (Pa). It selects the smallest alpha that achieves
+  `TARGET_STD` (default 0.5 Pa); if none meet the target, it picks the alpha with
+  the lowest filtered std. Use `WRITE_CONFIG=1` and then `SAVE_CONFIG` to persist
+  the chosen alpha. `WRITE_FILE=1` writes a table to `/tmp/pressure_filter_tune.txt`
+  with both alpha and its equivalent tau. Defaults: START=0.0 END=0.8 STEP=0.1
+  DURATION=10 SETTLE_SEC=2. Using `TAU_*`, a range like `TAU_START=0.0 TAU_END=5.0 TAU_STEP=0.5`
+  is typical. Alpha is computed from tau via `alpha = dt / (tau + dt)`.
 
-- `SET_PRESSURE_FILTER PRESSURE_FAN=<name> ALPHA=<0.0-1.0>`: Sets the control-side
-  EMA smoothing factor used on the pressure delta (0=no smoothing, 1=full).
-  This does not affect the raw values shown in queries unless the filtered
-  delta is included (see QUERY above). Use this to tune smoothing live without
-  restarting Klipper.
-- `SET_PRESSURE_FILTER PRESSURE_FAN=<name> ALPHA=<0.0-1.0>`: Sets the control-side
-  EMA smoothing factor used on the pressure delta (0=no smoothing, 1=full).
-  This does not affect the raw values shown in queries unless the filtered
-  delta is included (see QUERY above). Use this to tune smoothing live without
-  restarting Klipper.
+- `SET_PRESSURE_FILTER PRESSURE_FAN=<name> ALPHA=<0.0-1.0> | TAU_S=<sec>`: Sets the control-side
+  EMA smoothing factor on the pressure delta. You may specify either a direct
+  `ALPHA` or a smoothing time-constant `TAU_S` in seconds (`alpha = dt/(tau+dt)`).
+  This does not affect the raw values shown in queries unless the filtered delta
+  is included (see QUERY above). Use this to tune smoothing live without restarting Klipper.
 `PRESSURE_PID_CALIBRATE PRESSURE_FAN=<name> TARGET_DELTA=<Pa> [WRITE_FILE=1]
  [BAND_PA=<Pa>] [MIN_CYCLES=<n>] [MAX_CYCLES=<n>] [MAX_TIME=<sec>]
  [SETTLE_SEC=<sec>] [FILTER_ALPHA=<0..1>] [PEAK_DEADBAND=<Pa>]`:
