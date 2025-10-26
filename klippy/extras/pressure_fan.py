@@ -502,7 +502,8 @@ class ControlPID:
         self.min_deriv_time = config.getfloat('pid_deriv_time', 2.0, above=0.0)
         self.integ_max = self.pfan.max_speed / self.Ki if self.Ki else 0.0
         self.prev_err = 0.0
-        self.prev_time = 0.0
+        # Track controller time in host/reactor domain to avoid cross-MCU clock drift
+        self.prev_time = None
         self.prev_deriv = 0.0
         self.prev_integ = 0.0
 
@@ -519,7 +520,9 @@ class ControlPID:
                 err = 0.0
             else:
                 err = err - db if err > 0.0 else err + db
-        dt = read_time - self.prev_time
+        # Use reactor time for control math; only use MCU time when scheduling fan updates
+        now = self.pfan.reactor.monotonic()
+        dt = 0.0 if self.prev_time is None else (now - self.prev_time)
         # Derivative
         derr = err - self.prev_err
         if dt >= self.min_deriv_time:
@@ -537,7 +540,7 @@ class ControlPID:
         self.pfan.set_pf_speed(read_time, max(min_spd, bounded))
         # Save state
         self.prev_err = err
-        self.prev_time = read_time
+        self.prev_time = now
         self.prev_deriv = deriv
         if co == bounded:
             self.prev_integ = integ
