@@ -94,6 +94,14 @@ Troubleshooting first run:
 - Ensure a baseline is set (auto or via `SET_PRESSURE_BASELINE`). If baseline isn’t set, the controller won’t act.
   - When BASELINE is omitted, the module prefers a robust window average of raw pressure (trimmed mean) if there are at least `baseline_min_samples`; otherwise it falls back to an instantaneous reading.
 
+If delta creeps upward in step mode (not printing):
+- Disable the aggressive startup: `start_full_speed: false` to avoid a long initial overshoot filling the 60s window.
+- Shorten decisions so corrections happen sooner: try `decision_period: 20.0` and slightly larger nudges `step_speed: 0.07` with `band_pa: 0.7`.
+- Keep the averaging window modest (60–90s). With `decision_period` == `sample_window_sec`, decisions act on a full minute of history; using a shorter decision period reacts faster without chasing noise.
+- Re-capture baseline at rest after a minute: `SET_PRESSURE_BASELINE PRESSURE_FAN=exhaust`.
+- Sensor placement matters: ensure the BMx280 sees static pressure (not in a jet). Use a small side tap or a short capillary to a calmer pocket of air.
+- For stubborn cases, graph both raw delta and the windowed average using `QUERY_PRESSURE_FAN` or the optional `PRESSURE_DELTA` sensor. If raw delta is reasonable but the window keeps rising, it’s likely the initial window content (overshoot) and/or baseline timing.
+
 If delta climbs with the fan off:
 - That typically means ambient pressure or enclosure temperature is drifting relative to the earlier baseline. With the fan off and `TARGET_DELTA=0`, run `SET_PRESSURE_BASELINE PRESSURE_FAN=exhaust` to resync, or enable `auto_track_baseline: true` so the baseline slowly follows the current pressure when idle.
 
