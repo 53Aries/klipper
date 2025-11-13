@@ -248,6 +248,18 @@ armcm_main(void)
     RCC->APB1ENR = 0;
     RCC->APB2ENR = 0;
 
+#if CONFIG_STM32F4GD_DISABLE_SWD
+    // Optionally disable SWD (free PA13/PA14) early for GD32F4xx clones
+    // Enable GPIOA clock
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
+    RCC->AHB1ENR;
+    // Configure PA13/PA14 as general purpose input (00b)
+    // Each pin has two bits in MODER: pin n at bits [2n+1:2n]
+    GPIOA->MODER &= ~((3u << (13*2)) | (3u << (14*2)));
+    // Disable pull-up/pull-down on PA13/PA14
+    GPIOA->PUPDR &= ~((3u << (13*2)) | (3u << (14*2)));
+#endif
+
     clock_setup();
 
     sched_main();

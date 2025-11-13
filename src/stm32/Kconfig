@@ -31,6 +31,10 @@ choice
     config MACH_STM32F103
         bool "STM32F103"
         select MACH_STM32F1
+    config MACH_GD32F425
+        bool "GigaDevice GD32F425 (experimental)"
+        select MACH_STM32F4
+        select MACH_STM32F4x5
     config MACH_STM32F207
         bool "STM32F207"
         select MACH_STM32F2
@@ -183,6 +187,7 @@ config MCU
     default "stm32f429xx" if MACH_STM32F429
     default "stm32f446xx" if MACH_STM32F446
     default "stm32f765xx" if MACH_STM32F765
+    default "stm32f407xx" if MACH_GD32F425
     default "stm32g070xx" if MACH_STM32G070
     default "stm32g071xx" if MACH_STM32G071
     default "stm32g0b0xx" if MACH_STM32G0B0
@@ -268,6 +273,16 @@ config STM32F103GD_DISABLE_SWD
         reliably disable SWD at run-time. This can prevent the PA13
         and PA14 pins from being available. Selecting this option
         disables SWD at startup and thus makes these pins available.
+
+config STM32F4GD_DISABLE_SWD
+    bool "Disable SWD at startup (for GigaDevice GD32F425 clones)"
+    depends on MACH_GD32F425 && LOW_LEVEL_OPTIONS
+    default n
+    help
+        Some GigaDevice GD32F4xx clones may not reliably free PA13/PA14
+        (SWDIO/SWCLK) at runtime. Enable this to reconfigure PA13/PA14 as
+        GPIO at startup so they can be used as regular pins. Only enable
+        this if you need these pins and understand that it disables SWD.
 
 config STM32_DFU_ROM_ADDRESS
     hex
