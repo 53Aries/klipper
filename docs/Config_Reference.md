@@ -5191,6 +5191,21 @@ dout_pin:
 #   in software.
 ```
 
+#### CS1237
+This is a 24-bit ADC using a two-wire (bit-bang) interface similar to the HX71x.
+It can be used for filament scales and probing with suitable wiring and power filtering.
+```
+[load_cell]
+sensor_type: cs1237
+sclk_pin:
+#   The pin connected to the CS1237 clock (PD_SCK). This parameter must be provided.
+dout_pin:
+#   The pin connected to the CS1237 data output (DOUT). This parameter must be provided.
+#sample_rate: 320
+#   Host polling rate used for buffering and scheduling. Typical values are
+#   320 or 80. Default is 320. This does not change the chip's hardware rate.
+```
+
 #### ADS1220
 The ADS1220 is a 24 bit ADC supporting up to a 2Khz sample rate configurable in
 software.
