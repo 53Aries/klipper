@@ -21,6 +21,8 @@ class ADS131M02:
         # Minimal config surface
         self.channel = config.getint('channel', 0, minval=0, maxval=1)
         self.sps = config.getint('sps', 500, minval=10, maxval=20000)
+        # Align init style with ADS1220: allow skipping register init
+        self.init_chip = config.getboolean('init_chip', default=False)
         # SPI/Pin Setup only if enabled
         if not self.enabled:
             # Create minimal placeholders to avoid later attribute errors
@@ -108,9 +110,11 @@ class ADS131M02:
             return
         self.last_error_count = 0
         self.consecutive_fails = 0
-        # Initialize chip with fixed MODE and OSR from SPS
-        self.reset_chip()
-        self.setup_chip()
+        # Optional chip init (RESET/WREG/WAKEUP) — off by default to
+        # mirror safer ADS1220 behavior in your setup
+        if self.init_chip:
+            self.reset_chip()
+            self.setup_chip()
         rest_ticks = self.mcu.seconds_to_clock(1. / (10. * max(1, self.sps)))
         self.query_ads131m02_cmd.send([self.oid, rest_ticks])
         logging.info("ADS131M02 starting '%s' measurements", self.name)
