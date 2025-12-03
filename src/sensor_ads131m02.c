@@ -114,7 +114,8 @@ command_config_ads131m02(uint32_t *args)
     adc->timer.func = ads131m02_event;
     adc->pending_flag = 0;
     adc->spi = spidev_oid_lookup(args[1]);
-    adc->data_ready = gpio_in_setup(args[2], 0);
+    // ADS131M02 DRDY# is active-low; enable internal pull-up to avoid floating
+    adc->data_ready = gpio_in_setup(args[2], 1);
     uint8_t ch = args[3];
     adc->channel_select = (ch > 0) ? 1 : 0;
 }
