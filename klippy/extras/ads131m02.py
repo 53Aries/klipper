@@ -47,8 +47,9 @@ class ADS131M02:
         mcu.add_config_cmd(
             "config_ads131m02 oid=%d spi_oid=%d data_ready_pin=%s channel=%d"
             % (self.oid, self.spi.get_oid(), self.data_ready_pin, self.channel))
+        # Avoid any on-restart commands to keep MCU startup clean
         mcu.add_config_cmd("query_ads131m02 oid=%d rest_ticks=0"
-                           % (self.oid,), on_restart=True)
+                   % (self.oid,))
         mcu.register_config_callback(self._build_config)
         self.query_ads131m02_cmd = None
 
