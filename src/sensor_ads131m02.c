@@ -18,12 +18,14 @@
 struct ads131m02_adc {
     struct timer timer;
     uint32_t rest_ticks;
+    uint32_t data_ready_pin;
     struct gpio_in data_ready;
     struct spidev_s *spi;
     uint8_t pending_flag, data_count;
     uint8_t channel_select; // 0 or 1
     struct sensor_bulk sb;
     struct load_cell_probe *lce;
+    uint8_t started;
 };
 
 // Flag types
@@ -114,8 +116,10 @@ command_config_ads131m02(uint32_t *args)
     adc->timer.func = ads131m02_event;
     adc->pending_flag = 0;
     adc->spi = spidev_oid_lookup(args[1]);
-    // ADS131M02 DRDY# is active-low; enable internal pull-up to avoid floating
-    adc->data_ready = gpio_in_setup(args[2], 1);
+    // Defer DRDY pin configuration until capture starts to avoid interfering
+    // with USB or other boot-time behavior if this pin overlaps board functions.
+    adc->data_ready_pin = args[2];
+    adc->started = 0;
     uint8_t ch = args[3];
     adc->channel_select = (ch > 0) ? 1 : 0;
 }
@@ -149,6 +153,11 @@ command_query_ads131m02(uint32_t *args)
     adc->timer.waketime = timer_read_time() + adc->rest_ticks;
     sched_add_timer(&adc->timer);
     irq_enable();
+    // Configure DRDY# as input with pull-up only when starting capture
+    if (!adc->started) {
+        adc->data_ready = gpio_in_setup(adc->data_ready_pin, 1);
+        adc->started = 1;
+    }
 }
 DECL_COMMAND(command_query_ads131m02, "query_ads131m02 oid=%c rest_ticks=%u");
 
