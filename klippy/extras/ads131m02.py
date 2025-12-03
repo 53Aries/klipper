@@ -206,3 +206,7 @@ class ADS131M02:
 
 
 ADS131M02_SENSOR_TYPE = {"ads131m02": ADS131M02}
+
+# Klipper module entry point for the [ads131m02] config section
+def load_config(config):
+    return ADS131M02(config)
