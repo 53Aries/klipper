@@ -16,23 +16,32 @@ class ADS131M02:
         self.name = config.get_name().split()[-1]
         self.last_error_count = 0
         self.consecutive_fails = 0
+        # Safe gating: allow defining the section without touching MCU
+        self.enabled = config.getboolean('enabled', default=True)
         # Minimal config surface
         self.channel = config.getint('channel', 0, minval=0, maxval=1)
         self.sps = config.getint('sps', 500, minval=10, maxval=20000)
-        # SPI Setup
-        # Default speed: 1 MHz (ADS131M0x supports higher; increase as needed)
-        self.spi = bus.MCU_SPI_from_config(config, 1, default_speed=1000000)
-        self.mcu = mcu = self.spi.get_mcu()
-        self.oid = mcu.create_oid()
-        # Data Ready (DRDY) Pin
-        drdy_pin = config.get('data_ready_pin')
-        ppins = printer.lookup_object('pins')
-        drdy_ppin = ppins.lookup_pin(drdy_pin)
-        self.data_ready_pin = drdy_ppin['pin']
-        drdy_pin_mcu = drdy_ppin['chip']
-        if drdy_pin_mcu != self.mcu:
-            raise config.error("ADS131M02 config error: SPI communication and"
-                               " data_ready_pin must be on the same MCU")
+        # SPI/Pin Setup only if enabled
+        if not self.enabled:
+            # Create minimal placeholders to avoid later attribute errors
+            self.spi = None
+            self.mcu = printer.lookup_object('mcu')
+            self.oid = self.mcu.create_oid()
+            self.data_ready_pin = None
+        else:
+            # Default speed: 1 MHz (ADS131M0x supports higher; increase as needed)
+            self.spi = bus.MCU_SPI_from_config(config, 1, default_speed=1000000)
+            self.mcu = mcu = self.spi.get_mcu()
+            self.oid = mcu.create_oid()
+            # Data Ready (DRDY) Pin
+            drdy_pin = config.get('data_ready_pin')
+            ppins = printer.lookup_object('pins')
+            drdy_ppin = ppins.lookup_pin(drdy_pin)
+            self.data_ready_pin = drdy_ppin['pin']
+            drdy_pin_mcu = drdy_ppin['chip']
+            if drdy_pin_mcu != self.mcu:
+                raise config.error("ADS131M02 config error: SPI communication and"
+                                   " data_ready_pin must be on the same MCU")
 
         # Bulk Sensor Setup
         self.bulk_queue = bulk_sensor.BulkDataQueue(self.mcu, oid=self.oid)
@@ -44,14 +53,19 @@ class ADS131M02:
 
         # Command Configuration
         self.attach_probe_cmd = None
-        mcu.add_config_cmd(
-            "config_ads131m02 oid=%d spi_oid=%d data_ready_pin=%s channel=%d"
-            % (self.oid, self.spi.get_oid(), self.data_ready_pin, self.channel))
-        # Avoid any on-restart commands to keep MCU startup clean
-        mcu.add_config_cmd("query_ads131m02 oid=%d rest_ticks=0"
-                   % (self.oid,))
-        mcu.register_config_callback(self._build_config)
-        self.query_ads131m02_cmd = None
+        if self.enabled:
+            mcu.add_config_cmd(
+                "config_ads131m02 oid=%d spi_oid=%d data_ready_pin=%s channel=%d"
+                % (self.oid, self.spi.get_oid(), self.data_ready_pin, self.channel))
+            # Avoid any on-restart commands to keep MCU startup clean
+            mcu.add_config_cmd("query_ads131m02 oid=%d rest_ticks=0"
+                               % (self.oid,))
+            mcu.register_config_callback(self._build_config)
+            self.query_ads131m02_cmd = None
+        else:
+            # Register config callback minimally (no MCU commands when disabled)
+            mcu.register_config_callback(self._build_config)
+            self.query_ads131m02_cmd = None
 
     def _build_config(self):
         cq = self.spi.get_command_queue()
@@ -89,6 +103,9 @@ class ADS131M02:
 
     # Start, stop, and process message batches
     def _start_measurements(self):
+        if not self.enabled:
+            logging.info("ADS131M02 '%s' is disabled; skipping start", self.name)
+            return
         self.last_error_count = 0
         self.consecutive_fails = 0
         # Initialize chip with fixed MODE and OSR from SPS
@@ -100,7 +117,7 @@ class ADS131M02:
         self.ffreader.note_start()
 
     def _finish_measurements(self):
-        if self.printer.is_shutdown():
+        if self.printer.is_shutdown() or not self.enabled:
             return
         self.query_ads131m02_cmd.send_wait_ack([self.oid, 0])
         self.ffreader.note_end()
