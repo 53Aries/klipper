@@ -167,7 +167,7 @@ config WANT_ADS1220
 config WANT_ADS131M02
     bool
     depends on WANT_SPI
-    default y
+    default n
 config WANT_LDC1612
     bool
     depends on WANT_I2C
