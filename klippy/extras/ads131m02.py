@@ -16,6 +16,9 @@ class ADS131M02:
         self.name = config.get_name().split()[-1]
         self.last_error_count = 0
         self.consecutive_fails = 0
+        # Base MCU reference (safe even if disabled); may be overridden if enabled
+        self.mcu = printer.lookup_object('mcu')
+        self.oid = self.mcu.create_oid()
         # Safe gating: section can exist without touching MCU
         # Default disabled so a bare [ads131m02] header is harmless
         self.enabled = config.getboolean('enabled', default=False)
@@ -28,8 +31,8 @@ class ADS131M02:
         if self.enabled:
             # Default speed: 1 MHz (ADS131M0x supports higher; increase as needed)
             self.spi = bus.MCU_SPI_from_config(config, 1, default_speed=1000000)
-            self.mcu = mcu = self.spi.get_mcu()
-            self.oid = mcu.create_oid()
+            self.mcu = self.spi.get_mcu()
+            self.oid = self.mcu.create_oid()
             # Data Ready (DRDY) Pin
             drdy_pin = config.get('data_ready_pin')
             ppins = printer.lookup_object('pins')
@@ -49,7 +52,7 @@ class ADS131M02:
         # Bulk Sensor Setup
         self.bulk_queue = bulk_sensor.BulkDataQueue(self.mcu, oid=self.oid)
         chip_smooth = max(100, self.sps) * UPDATE_INTERVAL
-        self.ffreader = bulk_sensor.FixedFreqReader(mcu, chip_smooth, "<i")
+        self.ffreader = bulk_sensor.FixedFreqReader(self.mcu, chip_smooth, "<i")
         self.batch_bulk = bulk_sensor.BatchBulkHelper(
             self.printer, self._process_batch, self._start_measurements,
             self._finish_measurements, UPDATE_INTERVAL)
@@ -57,13 +60,13 @@ class ADS131M02:
         # Command Configuration
         self.attach_probe_cmd = None
         if self.enabled:
-            mcu.add_config_cmd(
+            self.mcu.add_config_cmd(
                 "config_ads131m02 oid=%d spi_oid=%d data_ready_pin=%s channel=%d"
                 % (self.oid, self.spi.get_oid(), self.data_ready_pin, self.channel))
             # Avoid any on-restart commands to keep MCU startup clean
-            mcu.add_config_cmd("query_ads131m02 oid=%d rest_ticks=0"
+            self.mcu.add_config_cmd("query_ads131m02 oid=%d rest_ticks=0"
                                % (self.oid,))
-            mcu.register_config_callback(self._build_config)
+            self.mcu.register_config_callback(self._build_config)
             self.query_ads131m02_cmd = None
         else:
             # Do not register callbacks or send commands when disabled
