@@ -19,9 +19,8 @@ class ADS131M02:
         # Base MCU reference (safe even if disabled); may be overridden if enabled
         self.mcu = printer.lookup_object('mcu')
         self.oid = self.mcu.create_oid()
-        # Safe gating: section can exist without touching MCU
-        # Default disabled so a bare [ads131m02] header is harmless
-        self.enabled = config.getboolean('enabled', default=False)
+        # Align with ADS1220 behavior: enabled by default
+        self.enabled = config.getboolean('enabled', default=True)
         # Minimal config surface
         self.channel = config.getint('channel', 0, minval=0, maxval=1)
         self.sps = config.getint('sps', 500, minval=10, maxval=20000)
@@ -63,13 +62,13 @@ class ADS131M02:
             self.mcu.add_config_cmd(
                 "config_ads131m02 oid=%d spi_oid=%d data_ready_pin=%s channel=%d"
                 % (self.oid, self.spi.get_oid(), self.data_ready_pin, self.channel))
-            # Avoid any on-restart commands to keep MCU startup clean
+            # Register normal callbacks (match ADS1220 style)
             self.mcu.add_config_cmd("query_ads131m02 oid=%d rest_ticks=0"
-                               % (self.oid,))
+                               % (self.oid,), on_restart=True)
             self.mcu.register_config_callback(self._build_config)
             self.query_ads131m02_cmd = None
         else:
-            # Do not register callbacks or send commands when disabled
+            # Keep inert when explicitly disabled
             self.query_ads131m02_cmd = None
 
     def _build_config(self):
@@ -113,8 +112,7 @@ class ADS131M02:
             return
         self.last_error_count = 0
         self.consecutive_fails = 0
-        # Optional chip init (RESET/WREG/WAKEUP) — off by default to
-        # mirror safer ADS1220 behavior in your setup
+        # Optional chip init (RESET/WREG/WAKEUP)
         if self.init_chip:
             self.reset_chip()
             self.setup_chip()
