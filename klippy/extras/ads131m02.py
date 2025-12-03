@@ -16,21 +16,16 @@ class ADS131M02:
         self.name = config.get_name().split()[-1]
         self.last_error_count = 0
         self.consecutive_fails = 0
-        # Safe gating: allow defining the section without touching MCU
-        self.enabled = config.getboolean('enabled', default=True)
+        # Safe gating: section can exist without touching MCU
+        # Default disabled so a bare [ads131m02] header is harmless
+        self.enabled = config.getboolean('enabled', default=False)
         # Minimal config surface
         self.channel = config.getint('channel', 0, minval=0, maxval=1)
         self.sps = config.getint('sps', 500, minval=10, maxval=20000)
         # Align init style with ADS1220: allow skipping register init
         self.init_chip = config.getboolean('init_chip', default=False)
         # SPI/Pin Setup only if enabled
-        if not self.enabled:
-            # Create minimal placeholders to avoid later attribute errors
-            self.spi = None
-            self.mcu = printer.lookup_object('mcu')
-            self.oid = self.mcu.create_oid()
-            self.data_ready_pin = None
-        else:
+        if self.enabled:
             # Default speed: 1 MHz (ADS131M0x supports higher; increase as needed)
             self.spi = bus.MCU_SPI_from_config(config, 1, default_speed=1000000)
             self.mcu = mcu = self.spi.get_mcu()
@@ -44,6 +39,12 @@ class ADS131M02:
             if drdy_pin_mcu != self.mcu:
                 raise config.error("ADS131M02 config error: SPI communication and"
                                    " data_ready_pin must be on the same MCU")
+        else:
+            # Minimal placeholders; avoid any MCU interaction
+            self.spi = None
+            self.mcu = printer.lookup_object('mcu')
+            self.oid = self.mcu.create_oid()
+            self.data_ready_pin = None
 
         # Bulk Sensor Setup
         self.bulk_queue = bulk_sensor.BulkDataQueue(self.mcu, oid=self.oid)
@@ -65,8 +66,7 @@ class ADS131M02:
             mcu.register_config_callback(self._build_config)
             self.query_ads131m02_cmd = None
         else:
-            # Register config callback minimally (no MCU commands when disabled)
-            mcu.register_config_callback(self._build_config)
+            # Do not register callbacks or send commands when disabled
             self.query_ads131m02_cmd = None
 
     def _build_config(self):
