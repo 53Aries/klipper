@@ -258,6 +258,9 @@ cs1237_read_adc(struct cs1237_adc *cs1237, uint8_t oid)
     gpio_out_toggle_noirq(cs1237->sclk);
     cs1237_delay_noirq();
     gpio_out_toggle_noirq(cs1237->sclk);
+    cs1237_delay_noirq();
+    // Check if DOUT went high after read (indicates successful read)
+    uint_fast8_t dout_state = gpio_in_read(cs1237->dout);
     irq_enable();
 
     // Clear pending flag (and note if an overflow occurred)
@@ -272,7 +275,10 @@ cs1237_read_adc(struct cs1237_adc *cs1237, uint8_t oid)
         counts |= 0xFF000000;
 
     // Check for errors
-    if (flags & CS_OVERFLOW) {
+    if (!dout_state) {
+        // DOUT should be high after read - if still low, read failed (desync)
+        cs1237->last_error = SAMPLE_ERROR_DESYNC;
+    } else if (flags & CS_OVERFLOW) {
         // Transfer took too long
         cs1237->last_error = SAMPLE_ERROR_READ_TOO_LONG;
     }
