@@ -1,6 +1,7 @@
 // Support for bit-banging commands to CS1237 ADC chip
 //
 // Copyright (C) 2024 Gareth Farrington <gareth@waves.ky>
+// Copyright (C) 2025 53Aries
 //
 // This file may be distributed under the terms of the GNU GPLv3 license.
 
