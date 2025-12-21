@@ -5114,6 +5114,33 @@ dout_pin:
 #   in software.
 ```
 
+#### CS1237
+The CS1237 is a 24 bit ADC with configurable sample rate and gain settings.
+It uses "bit-bang" communications similar to HX711/HX717 but with higher
+maximum sample rates.
+```
+[load_cell]
+sensor_type: cs1237
+sclk_pin:
+#   The pin connected to the CS1237 clock line. This parameter must be provided.
+dout_pin:
+#   The pin connected to the CS1237 data output line. This parameter must be
+#   provided.
+#gain: 128
+#   Valid gain values are: 1, 2, 64, 128. The default is 128.
+#   Use higher gains for smaller signals (typical load cell applications use 128).
+#sample_rate: 640
+#   Valid values for sample_rate are: 10, 40, 640, 1280. The default is 640.
+#   Higher sample rates provide faster updates but may be noisier.
+#   10 Hz: High precision, low noise
+#   40 Hz: Balanced performance
+#   640 Hz: Fast updates, suitable for probing
+#   1280 Hz: Maximum speed
+#channel: A
+#   Valid values are 'A' or 'TEMP'. 'A' is the primary load cell input channel.
+#   'TEMP' selects the internal temperature sensor. The default is 'A'.
+```
+
 #### ADS1220
 The ADS1220 is a 24 bit ADC supporting up to a 2Khz sample rate configurable in
 software.

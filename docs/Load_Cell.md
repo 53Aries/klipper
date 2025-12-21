@@ -470,6 +470,22 @@ ESD. A large ground plane on the first board layer under the chip can help with
 noise. Keep the chip away from power sections and DC to DC converters. The board
 should have proper grounding back to the DC supply.
 
+### CS1237 Notes
+
+The CS1237 is a 24-bit ADC designed specifically for load cell applications:
+
+* Uses bit-bang communication similar to HX711/HX717 but with higher maximum
+  sample rates (up to 1280 Hz).
+* Offers configurable sample rates (10, 40, 640, 1280 Hz) and gains (1, 2, 64, 128)
+  that can be set from Klipper's config.
+* The 640 Hz sample rate provides a good balance between speed and noise
+  performance for probing applications.
+* Includes an internal temperature sensor that can be used for monitoring.
+* Lower cost alternative to SPI-based ADCs while offering better performance
+  than HX711.
+* Configuration is done via the MCU at startup, no physical rewiring needed
+  to change settings.
+
 ### HX711 and HX717 Notes
 
 This sensor is popular because of its low cost and availability in the
