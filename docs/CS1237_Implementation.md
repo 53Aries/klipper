@@ -113,7 +113,7 @@ The CS1237 uses a 2-wire synchronous serial interface:
 ```ini
 [load_cell_probe]
 sensor_type: cs1237
-dout_pin: ^PB7
+dout_pin: PB7
 sclk_pin: PB6
 sample_rate: 640
 gain: 128
@@ -158,7 +158,7 @@ force_safety_limit: 2000
 ### No Data / Communication Errors
 - Check pin assignments
 - Verify MCU matches on both pins
-- Check pullup on dout_pin (use ^)
+- Ensure dout_pin has no pullup (do not use ^)
 - Verify CS1237 power supply
 
 ### Unstable Readings
