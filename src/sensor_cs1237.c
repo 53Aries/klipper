@@ -126,12 +126,11 @@ cs1237_write_config(struct cs1237_adc *cs1237, uint8_t config)
     }
     
     // Send 7 config bits (MSB first)
+    // Note: The CS1237 echoes back the config bits on DOUT
     for (i = 6; i >= 0; i--) {
-        uint_fast8_t bit = (config >> i) & 1;
         irq_disable();
         gpio_out_toggle_noirq(cs1237->sclk);
         cs1237_delay_noirq();
-        // Check DOUT value matches our bit (chip echoes)
         gpio_out_toggle_noirq(cs1237->sclk);
         irq_enable();
         cs1237_delay();
