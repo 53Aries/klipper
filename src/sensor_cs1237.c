@@ -322,7 +322,7 @@ command_query_cs1237(uint32_t *args)
     uint8_t oid = args[0];
     struct cs1237_adc *cs1237 = oid_lookup(oid, command_config_cs1237);
     sched_del_timer(&cs1237->timer);
-    cs1237->flags = 0;
+    cs1237->flags = 0;  // Clear CS_CONFIGURED flag - will reconfigure on next read
     cs1237->last_error = 0;
     cs1237->rest_ticks = args[1];
     if (!cs1237->rest_ticks) {
