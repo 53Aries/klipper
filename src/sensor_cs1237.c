@@ -23,8 +23,9 @@ struct cs1237_adc {
     uint8_t flags;
     uint32_t rest_ticks;
     uint32_t last_error;
-    struct gpio_in dout; // pin used to receive data from the cs1237
-    struct gpio_out sclk; // pin used to generate clock for the cs1237
+    uint32_t dout_pin;      // pin number for mode switching
+    struct gpio_in dout;    // pin used to receive data from the cs1237
+    struct gpio_out sclk;   // pin used to generate clock for the cs1237
     struct sensor_bulk sb;
     struct load_cell_probe *lce;
 };
@@ -105,13 +106,9 @@ cs1237_raw_read(struct gpio_in dout, struct gpio_out sclk, int num_bits)
 // Per CS1237 datasheet:
 // 1. After 24-bit data read, send 29-36 additional pulses to enter config mode
 // 2. On 37th pulse, DOUT goes low (ready for config write)
-// 3. Send 7 config bits on pulses 38-44 (chip latches on rising edge)
-// 4. Config takes effect after 46th pulse
-//
-// NOTE: The CS1237 requires bidirectional DOUT during config write.
-// This implementation relies on the chip's default config or pre-configured
-// state. For full configuration support, DOUT would need to be switchable
-// between input and output modes, which requires hardware-specific GPIO support.
+// 3. MCU switches DOUT to output and sends 7 config bits on pulses 38-44
+// 4. MCU switches DOUT back to input
+// 5. Config takes effect after 46th pulse
 static void
 cs1237_write_config(struct cs1237_adc *cs1237, uint8_t config)
 {
@@ -136,14 +133,42 @@ cs1237_write_config(struct cs1237_adc *cs1237, uint8_t config)
     cs1237_delay_noirq();
     irq_enable();
     
-    // Check if DOUT went low (optional, for debugging)
-    // In production, we proceed regardless as timing is critical
+#ifdef GPIO_INPUT
+    // On MCUs with GPIO mode switching (STM32, etc), we can write config properly
+    // Switch DOUT to output mode for config write
+    struct gpio_out dout_out = gpio_out_setup(cs1237->dout_pin, 0);
     
     // Write 7 config bits on pulses 38-44 (MSB first)
-    // During config write, chip samples DOUT (which should be config data)
-    // However, since DOUT is input-only on MCU side, chip uses internal
-    // pull-up/down during this phase and we just send clock pulses
-    // The config byte is latched from internal register based on initial state
+    // CS1237 samples DOUT on rising edge of SCLK
+    for (i = 6; i >= 0; i--) {
+        uint8_t bit = (config >> i) & 1;
+        gpio_out_write(dout_out, bit);
+        irq_disable();
+        gpio_out_toggle_noirq(cs1237->sclk);  // SCLK high - CS1237 latches bit
+        cs1237_delay_noirq();
+        gpio_out_toggle_noirq(cs1237->sclk);  // SCLK low
+        cs1237_delay_noirq();
+        irq_enable();
+        cs1237_delay();
+    }
+    
+    // Send 2 more pulses (45-46) to complete config write
+    gpio_out_write(dout_out, 0);
+    for (i = 0; i < 2; i++) {
+        irq_disable();
+        gpio_out_toggle_noirq(cs1237->sclk);
+        cs1237_delay_noirq();
+        gpio_out_toggle_noirq(cs1237->sclk);
+        cs1237_delay_noirq();
+        irq_enable();
+        cs1237_delay();
+    }
+    
+    // Switch DOUT back to input mode for reading
+    cs1237->dout = gpio_in_setup(cs1237->dout_pin, 1);
+#else
+    // On MCUs without GPIO mode switching, send clock pulses only
+    // Chip will use default or pre-programmed configuration
     for (i = 6; i >= 0; i--) {
         irq_disable();
         gpio_out_toggle_noirq(cs1237->sclk);  // SCLK high
@@ -164,6 +189,7 @@ cs1237_write_config(struct cs1237_adc *cs1237, uint8_t config)
         irq_enable();
         cs1237_delay();
     }
+#endif
 }
 
 
@@ -273,6 +299,7 @@ command_config_cs1237(uint32_t *args)
                 , command_config_cs1237, sizeof(*cs1237));
     cs1237->timer.func = cs1237_event;
     cs1237->config_byte = args[1];
+    cs1237->dout_pin = args[2];  // Store pin number for mode switching
     cs1237->dout = gpio_in_setup(args[2], 1);
     cs1237->sclk = gpio_out_setup(args[3], 0);
 }
