@@ -308,6 +308,8 @@ command_config_cs1237(uint32_t *args)
     cs1237->dout_pin = args[2];  // Store pin number for mode switching
     cs1237->dout = gpio_in_setup(args[2], 1);
     cs1237->sclk = gpio_out_setup(args[3], 0);
+    // Ensure SCLK starts low - CS1237 auto-starts conversions on power-up
+    gpio_out_write(cs1237->sclk, 0);
 }
 DECL_COMMAND(command_config_cs1237, "config_cs1237 oid=%c config=%c"
              " dout_pin=%u sclk_pin=%u");
