@@ -244,12 +244,6 @@ add_sample(struct cs1237_adc *cs1237, uint8_t oid, uint32_t counts,
 static void
 cs1237_read_adc(struct cs1237_adc *cs1237, uint8_t oid)
 {
-    // Configure chip on first read
-    if (!(cs1237->flags & CS_CONFIGURED)) {
-        cs1237_write_config(cs1237, cs1237->config_byte);
-        cs1237->flags |= CS_CONFIGURED;
-    }
-
     // Read 24 bits from sensor
     uint32_t adc = cs1237_raw_read(cs1237->dout, cs1237->sclk, 24);
     
@@ -262,6 +256,12 @@ cs1237_read_adc(struct cs1237_adc *cs1237, uint8_t oid)
     // Check if DOUT went high after read (indicates successful read)
     uint_fast8_t dout_state = gpio_in_read(cs1237->dout);
     irq_enable();
+    
+    // Configure chip after first successful read
+    if (!(cs1237->flags & CS_CONFIGURED) && dout_state) {
+        cs1237_write_config(cs1237, cs1237->config_byte);
+        cs1237->flags |= CS_CONFIGURED;
+    }
 
     // Clear pending flag (and note if an overflow occurred)
     irq_disable();
