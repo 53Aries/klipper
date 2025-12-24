@@ -336,8 +336,8 @@ cs1237_read_adc(struct cs1237_adc *cs1237, uint8_t oid)
         load_cell_probe_report_sample(cs1237->lce, counts);
     }
 
-    // Add measurement to buffer
-    add_sample(cs1237, oid, counts, false);
+    // Add measurement to buffer and flush so host drains promptly
+    add_sample(cs1237, oid, counts, true);
 }
 
 // Create a cs1237 sensor
@@ -398,8 +398,9 @@ command_query_cs1237_status(const uint32_t *args)
     irq_disable();
     const uint32_t start_t = timer_read_time();
     uint8_t is_data_ready = cs1237_is_data_ready(cs1237);
+    uint8_t buffered = cs1237->sb.data_count;
     irq_enable();
-    uint8_t pending_bytes = is_data_ready ? BYTES_PER_SAMPLE : 0;
+    uint8_t pending_bytes = buffered + (is_data_ready ? BYTES_PER_SAMPLE : 0);
     sensor_bulk_status(&cs1237->sb, oid, start_t, 0, pending_bytes);
 }
 DECL_COMMAND(command_query_cs1237_status, "query_cs1237_status oid=%c");
