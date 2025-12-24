@@ -102,60 +102,74 @@ cs1237_raw_read(struct gpio_in dout, struct gpio_out sclk, int num_bits)
     return bits_read;
 }
 
-// Write configuration to CS1237
-// Per CS1237 datasheet:
-// 1. After 24-bit data read, send 29-36 additional pulses to enter config mode
-// 2. On 37th pulse, DOUT goes low (ready for config write)
-// 3. MCU switches DOUT to output and sends 7 config bits on pulses 38-44
-// 4. MCU switches DOUT back to input
-// 5. Config takes effect after 46th pulse
+// Write configuration to CS1237 per datasheet Figure 9
+// Full 46-clock sequence:
+// Clocks 1-24: Read ADC data (done before calling this)
+// Clocks 25-27: 3 additional pulses
+// Clocks 28-29: Switch DRDY/DOUT to input
+// Clocks 30-36: Send command 0x65 (7 bits, MSB first)
+// Clock 37: Switch direction
+// Clocks 38-45: Send 8-bit config data (MSB first)
+// Clock 46: Complete and pull DOUT high
 static void
 cs1237_write_config(struct cs1237_adc *cs1237, uint8_t config)
 {
     int i;
-    // Enter config mode: send 29 pulses minimum (we use 36 for margin)
-    // SCLK should already be low from previous data read
-    for (i = 0; i < 36; i++) {
+    // Clocks 25-27: Additional pulses after 24-bit data read
+    for (i = 0; i < 3; i++) {
         irq_disable();
-        gpio_out_toggle_noirq(cs1237->sclk);  // SCLK high
+        gpio_out_toggle_noirq(cs1237->sclk);
         cs1237_delay_noirq();
-        gpio_out_toggle_noirq(cs1237->sclk);  // SCLK low
+        gpio_out_toggle_noirq(cs1237->sclk);
         cs1237_delay_noirq();
         irq_enable();
         cs1237_delay();
     }
     
-    // On 37th pulse, DOUT should go low indicating ready for config
-    irq_disable();
-    gpio_out_toggle_noirq(cs1237->sclk);  // SCLK high (pulse 37)
-    cs1237_delay_noirq();
-    gpio_out_toggle_noirq(cs1237->sclk);  // SCLK low
-    cs1237_delay_noirq();
-    irq_enable();
+    // Clocks 28-29: Prep for command input
+    for (i = 0; i < 2; i++) {
+        irq_disable();
+        gpio_out_toggle_noirq(cs1237->sclk);
+        cs1237_delay_noirq();
+        gpio_out_toggle_noirq(cs1237->sclk);
+        cs1237_delay_noirq();
+        irq_enable();
+        cs1237_delay();
+    }
     
 #ifdef GPIO_INPUT
-    // On MCUs with GPIO mode switching (STM32, etc), we can write config properly
-    // Switch DOUT to output mode for config write
+    // Switch DOUT to output for sending command and config
     struct gpio_out dout_out = gpio_out_setup(cs1237->dout_pin, 0);
     
-    // Write 7 config bits on pulses 38-44 (MSB first)
-    // CS1237 samples DOUT on rising edge of SCLK
+    // Clocks 30-36: Send write command 0x65 (7 bits, MSB first)
+    uint8_t cmd = 0x65;
     for (i = 6; i >= 0; i--) {
+        uint8_t bit = (cmd >> i) & 1;
+        gpio_out_write(dout_out, bit);
+        irq_disable();
+        gpio_out_toggle_noirq(cs1237->sclk);
+        cs1237_delay_noirq();
+        gpio_out_toggle_noirq(cs1237->sclk);
+        cs1237_delay_noirq();
+        irq_enable();
+        cs1237_delay();
+    }
+    
+    // Clock 37: Direction switch
+    gpio_out_write(dout_out, 0);
+    irq_disable();
+    gpio_out_toggle_noirq(cs1237->sclk);
+    cs1237_delay_noirq();
+    gpio_out_toggle_noirq(cs1237->sclk);
+    cs1237_delay_noirq();
+    irq_enable();
+    cs1237_delay();
+    
+    // Clocks 38-45: Send 8-bit config (B7-B0, MSB first)
+    for (i = 7; i >= 0; i--) {
         uint8_t bit = (config >> i) & 1;
         gpio_out_write(dout_out, bit);
         irq_disable();
-        gpio_out_toggle_noirq(cs1237->sclk);  // SCLK high - CS1237 latches bit
-        cs1237_delay_noirq();
-        gpio_out_toggle_noirq(cs1237->sclk);  // SCLK low
-        cs1237_delay_noirq();
-        irq_enable();
-        cs1237_delay();
-    }
-    
-    // Send 2 more pulses (45-46) to complete config write
-    gpio_out_write(dout_out, 0);
-    for (i = 0; i < 2; i++) {
-        irq_disable();
         gpio_out_toggle_noirq(cs1237->sclk);
         cs1237_delay_noirq();
         gpio_out_toggle_noirq(cs1237->sclk);
@@ -164,23 +178,20 @@ cs1237_write_config(struct cs1237_adc *cs1237, uint8_t config)
         cs1237_delay();
     }
     
-    // Switch DOUT back to input mode for reading
+    // Clock 46: Completion
+    gpio_out_write(dout_out, 1);
+    irq_disable();
+    gpio_out_toggle_noirq(cs1237->sclk);
+    cs1237_delay_noirq();
+    gpio_out_toggle_noirq(cs1237->sclk);
+    cs1237_delay_noirq();
+    irq_enable();
+    
+    // Switch DOUT back to input
     cs1237->dout = gpio_in_setup(cs1237->dout_pin, 1);
 #else
-    // On MCUs without GPIO mode switching, send clock pulses only
-    // Chip will use default or pre-programmed configuration
-    for (i = 6; i >= 0; i--) {
-        irq_disable();
-        gpio_out_toggle_noirq(cs1237->sclk);  // SCLK high
-        cs1237_delay_noirq();
-        gpio_out_toggle_noirq(cs1237->sclk);  // SCLK low
-        cs1237_delay_noirq();
-        irq_enable();
-        cs1237_delay();
-    }
-    
-    // Send 2 more pulses (45-46) to complete config write
-    for (i = 0; i < 2; i++) {
+    // Without GPIO switching: send 17 clock pulses (clocks 30-46)
+    for (i = 0; i < 17; i++) {
         irq_disable();
         gpio_out_toggle_noirq(cs1237->sclk);
         cs1237_delay_noirq();
