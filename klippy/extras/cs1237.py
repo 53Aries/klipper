@@ -17,7 +17,7 @@ SAMPLE_ERROR_LONG_READ = 0x40000000
 # CS1237 Configuration Register Format (8-bit: B7-B0)
 # Per datasheet Section 2.6.7.2:
 # B7: Reserved (must be 0)
-# B6: REF output switch (1=on, 0=off)
+# B6: REFO_OFF - REF output switch (1=turn OFF, 0=keep ON/default)
 # B5-B4: SPEED_SEL (00=10Hz, 01=40Hz, 10=640Hz, 11=1280Hz)
 # B3-B2: PGA_SEL (00=1, 01=2, 10=64, 11=128)
 # B1-B0: CH_SEL (00=Channel A, 01=Chip retention, 10=Temp, 11=Internal short)
@@ -35,7 +35,7 @@ CONFIG_GAIN_128 = 0x03
 CONFIG_CHANNEL_A = 0x00
 CONFIG_CHANNEL_TEMP = 0x02
 
-CONFIG_REF_ON = 0x01  # REF output on (default)
+CONFIG_REFO_OFF = 0x00  # Keep REF output ON (normal operation, write 0 to B6)
 
 
 class CS1237:
@@ -80,8 +80,8 @@ class CS1237:
         channel_config = config.getchoice('channel', channel_options,
                                           default='A')
         
-        # Build 8-bit config byte: B7=0, B6=1 (REF on), B5-B4=speed, B3-B2=gain, B1-B0=channel
-        self.config_byte = ((0 << 7) | (CONFIG_REF_ON << 6) | (speed_config << 4) 
+        # Build 8-bit config byte: B7=0, B6=0 (REF on), B5-B4=speed, B3-B2=gain, B1-B0=channel
+        self.config_byte = ((0 << 7) | (CONFIG_REFO_OFF << 6) | (speed_config << 4) 
                             | (gain_config << 2) | channel_config)
         
         ## Bulk Sensor Setup
