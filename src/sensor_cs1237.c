@@ -21,6 +21,7 @@ struct cs1237_adc {
     struct timer timer;
     uint8_t config_byte;    // configuration register value
     uint8_t flags;
+    uint8_t warmup_remaining; // discard initial conversions after config
     uint32_t rest_ticks;
     uint32_t last_error;
     uint32_t dout_pin;      // pin number for mode switching
@@ -45,16 +46,18 @@ static struct task_wake wake_cs1237;
  * Low-level bit-banging
  ****************************************************************/
 
-// CS1237 requires minimum 1us clock period (0.5us per half cycle)
-#define MIN_PULSE_TIME nsecs_to_ticks(500)
-
 static uint32_t
 nsecs_to_ticks(uint32_t ns)
 {
-    return timer_from_us(ns * 1000) / 1000000;
+    // Convert nanoseconds to timer ticks using integer math
+    uint64_t ticks_per_us = timer_from_us(1);
+    return (uint32_t)((ticks_per_us * ns + 999) / 1000);
 }
 
-// Pause for 200ns
+// CS1237 requires minimum 1us clock period (0.5us per half cycle)
+#define MIN_PULSE_TIME nsecs_to_ticks(500)
+
+// Pause for ~500ns half-cycle per datasheet t5/t6/t7
 static void
 cs1237_delay_noirq(void)
 {
@@ -68,7 +71,7 @@ cs1237_delay_noirq(void)
         ;
 }
 
-// Pause for a minimum of 200ns
+// Pause for a minimum of ~500ns
 static void
 cs1237_delay(void)
 {
@@ -100,6 +103,14 @@ cs1237_raw_read(struct gpio_in dout, struct gpio_out sclk, int num_bits)
         bits_read = (bits_read << 1) | bit;
     }
     return bits_read;
+}
+
+static uint8_t
+cs1237_warmup_count(uint8_t config_byte)
+{
+    // Datasheet: discard first 3 conversions at 10/40Hz, 4 at 640/1280Hz
+    uint8_t speed = (config_byte >> 4) & 0x03;
+    return (speed <= 0x01) ? 3 : 4;
 }
 
 // Write configuration to CS1237 per datasheet Figure 9
@@ -139,8 +150,7 @@ cs1237_write_config(struct cs1237_adc *cs1237, uint8_t config)
         cs1237_delay();
     }
     
-#ifdef GPIO_INPUT
-    // Switch DOUT to output for sending command and config
+    // Switch DOUT to output for sending command and config per Figure 9
     struct gpio_out dout_out = gpio_out_setup(cs1237->dout_pin, 0);
     
     // Clocks 30-36: Send write command 0x65 (7 bits, MSB first)
@@ -191,18 +201,6 @@ cs1237_write_config(struct cs1237_adc *cs1237, uint8_t config)
     
     // Switch DOUT back to input
     cs1237->dout = gpio_in_setup(cs1237->dout_pin, 1);
-#else
-    // Without GPIO switching: send 17 clock pulses (clocks 30-46)
-    for (i = 0; i < 17; i++) {
-        irq_disable();
-        gpio_out_toggle_noirq(cs1237->sclk);
-        cs1237_delay_noirq();
-        gpio_out_toggle_noirq(cs1237->sclk);
-        cs1237_delay_noirq();
-        irq_enable();
-        cs1237_delay();
-    }
-#endif
 }
 
 
@@ -272,6 +270,7 @@ cs1237_read_adc(struct cs1237_adc *cs1237, uint8_t oid)
     
     // Configure chip after first successful read (only once)
     if (!(cs1237->flags & CS_CONFIGURED) && dout_state) {
+        uint8_t configured = 0;
         // Wait for chip to be ready (DOUT goes low again)
         // This ensures we don't try to configure during a conversion
         uint32_t timeout = timer_read_time() + timer_from_us(500000); // 500ms timeout
@@ -293,9 +292,12 @@ cs1237_read_adc(struct cs1237_adc *cs1237, uint8_t oid)
             
             // Now write config
             cs1237_write_config(cs1237, cs1237->config_byte);
+            configured = 1;
+            cs1237->warmup_remaining = cs1237_warmup_count(cs1237->config_byte);
         }
-        
-        cs1237->flags |= CS_CONFIGURED;
+
+        if (configured)
+            cs1237->flags |= CS_CONFIGURED;
     }
 
     // Clear pending flag (and note if an overflow occurred)
@@ -323,6 +325,12 @@ cs1237_read_adc(struct cs1237_adc *cs1237, uint8_t oid)
         counts = cs1237->last_error;
     }
 
+    // Discard initial conversions after (re)configuration to meet setup time
+    if (cs1237->warmup_remaining && cs1237->last_error == 0) {
+        cs1237->warmup_remaining--;
+        return;
+    }
+
     // probe is optional, report if enabled
     if (cs1237->last_error == 0 && cs1237->lce) {
         load_cell_probe_report_sample(cs1237->lce, counts);
@@ -343,6 +351,7 @@ command_config_cs1237(uint32_t *args)
     cs1237->dout_pin = args[2];  // Store pin number for mode switching
     cs1237->dout = gpio_in_setup(args[2], 1);
     cs1237->sclk = gpio_out_setup(args[3], 0);
+    cs1237->warmup_remaining = 0;
     // Ensure SCLK starts low - CS1237 auto-starts conversions on power-up
     gpio_out_write(cs1237->sclk, 0);
 }
@@ -422,6 +431,7 @@ command_cs1237_set_config(const uint32_t *args)
     
     // Write configuration
     cs1237_write_config(cs1237, cs1237->config_byte);
+    cs1237->warmup_remaining = cs1237_warmup_count(cs1237->config_byte);
 }
 DECL_COMMAND(command_cs1237_set_config, "cs1237_set_config oid=%c");
 
