@@ -103,9 +103,10 @@ class CS1237:
         # Command Configuration
         self.query_cs1237_cmd = None
         self.attach_probe_cmd = None
+        self.drive_config = config.getboolean('drive_config', True)
         mcu.add_config_cmd(
-            "config_cs1237 oid=%d config=%d dout_pin=%s sclk_pin=%s"
-            % (self.oid, self.config_byte, self.dout_pin, self.sclk_pin))
+            "config_cs1237 oid=%d config=%d dout_pin=%s sclk_pin=%s drive_config=%d"
+            % (self.oid, self.config_byte, self.dout_pin, self.sclk_pin, 1 if self.drive_config else 0))
         mcu.add_config_cmd("query_cs1237 oid=%d rest_ticks=0"
                            % (self.oid,), on_restart=True)
         

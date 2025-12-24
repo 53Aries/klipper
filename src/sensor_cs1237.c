@@ -22,6 +22,7 @@ struct cs1237_adc {
     uint8_t config_byte;    // configuration register value
     uint8_t flags;
     uint8_t warmup_remaining; // discard initial conversions after config
+    uint8_t drive_config;   // if 0, do not drive DOUT during config (read-only)
     uint32_t rest_ticks;
     uint32_t last_error;
     uint32_t dout_pin;      // pin number for mode switching
@@ -150,9 +151,23 @@ cs1237_write_config(struct cs1237_adc *cs1237, uint8_t config)
         cs1237_delay();
     }
     
+    if (!cs1237->drive_config) {
+        // Read-only mode: just send 17 pulses (clocks 30-46) without driving DOUT
+        for (i = 0; i < 17; i++) {
+            irq_disable();
+            gpio_out_toggle_noirq(cs1237->sclk);
+            cs1237_delay_noirq();
+            gpio_out_toggle_noirq(cs1237->sclk);
+            cs1237_delay_noirq();
+            irq_enable();
+            cs1237_delay();
+        }
+        return;
+    }
+
     // Switch DOUT to output for sending command and config per Figure 9
     struct gpio_out dout_out = gpio_out_setup(cs1237->dout_pin, 0);
-    
+
     // Clocks 30-36: Send write command 0x65 (7 bits, MSB first)
     uint8_t cmd = 0x65;
     for (i = 6; i >= 0; i--) {
@@ -351,12 +366,13 @@ command_config_cs1237(uint32_t *args)
     cs1237->dout_pin = args[2];  // Store pin number for mode switching
     cs1237->dout = gpio_in_setup(args[2], 1);
     cs1237->sclk = gpio_out_setup(args[3], 0);
+    cs1237->drive_config = args[4];
     cs1237->warmup_remaining = 0;
     // Ensure SCLK starts low - CS1237 auto-starts conversions on power-up
     gpio_out_write(cs1237->sclk, 0);
 }
 DECL_COMMAND(command_config_cs1237, "config_cs1237 oid=%c config=%c"
-             " dout_pin=%u sclk_pin=%u");
+             " dout_pin=%u sclk_pin=%u drive_config=%c");
 
 void
 cs1237_attach_load_cell_probe(uint32_t *args) {
@@ -413,6 +429,9 @@ command_cs1237_set_config(const uint32_t *args)
     struct cs1237_adc *cs1237 = oid_lookup(oid, command_config_cs1237);
     
     // Wait for data ready, then write config
+    if (!cs1237->drive_config)
+        return; // In read-only mode, skip config writes entirely
+
     uint32_t timeout = timer_read_time() + timer_from_us(500000); // 500ms timeout
     while (!cs1237_is_data_ready(cs1237)) {
         if (timer_is_before(timeout, timer_read_time()))
