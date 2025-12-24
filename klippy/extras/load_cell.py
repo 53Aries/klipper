@@ -177,6 +177,10 @@ class LoadCellGuidedCalibrationHelper:
         register_command("TARE", self.cmd_TARE, desc=self.cmd_TARE_help)
         register_command("CALIBRATE", self.cmd_CALIBRATE,
                          desc=self.cmd_CALIBRATE_help)
+        # CS1237 specific command
+        if hasattr(self.sensor, 'write_config'):
+            register_command("WRITE_CS1237_CONFIG", self.cmd_WRITE_CS1237_CONFIG,
+                             desc=self.cmd_WRITE_CS1237_CONFIG_help)
 
     # convert the delta of counts to a counts/gram metric
     def counts_per_gram(self, grams, cal_counts):
@@ -229,6 +233,14 @@ class LoadCellGuidedCalibrationHelper:
                 "Check for external force on the load cell.")
         gcmd.respond_info("Now apply a known force to the load cell and enter \
                          the force value with:\n CALIBRATE GRAMS=nnn")
+
+    cmd_WRITE_CS1237_CONFIG_help = "Manually write CS1237 configuration register"
+    def cmd_WRITE_CS1237_CONFIG(self, gcmd):
+        if hasattr(self.sensor, 'write_config'):
+            self.sensor.write_config()
+            gcmd.respond_info("CS1237 configuration write triggered")
+        else:
+            gcmd.respond_info("Sensor does not support manual config write")
 
     cmd_CALIBRATE_help = "Enter the load cell value in grams"
     def cmd_CALIBRATE(self, gcmd):
