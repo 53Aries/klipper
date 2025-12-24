@@ -80,7 +80,8 @@ class LoadCellCommandHelper:
         gcode.register_mux_command("LOAD_CELL_DIAGNOSTIC", "LOAD_CELL", name,
                                    self.cmd_LOAD_CELL_DIAGNOSTIC,
                                    desc=self.cmd_LOAD_CELL_DIAGNOSTIC_help)
-        # CS1237 specific command - always register, check sensor type in handler
+        # CS1237 manual config write command
+        # Allows manual triggering of configuration write for testing/recovery
         gcode.register_mux_command("WRITE_CS1237_CONFIG", "LOAD_CELL", name,
                                    self.cmd_WRITE_CS1237_CONFIG,
                                    desc=self.cmd_WRITE_CS1237_CONFIG_help)
