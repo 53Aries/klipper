@@ -1,3 +1,6 @@
+CS1237 on Qidi Q2. DO NOT ATTEMPT. CS1237 registers will be corrupted past repair.
+
+
 Welcome to the Klipper project!
 
 [![Klipper](docs/img/klipper-logo-small.png)](https://www.klipper3d.org/)
