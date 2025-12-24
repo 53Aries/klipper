@@ -103,20 +103,22 @@ cs1237_raw_read(struct gpio_in dout, struct gpio_out sclk, int num_bits)
 }
 
 // Write configuration to CS1237 per datasheet Figure 9
-// Full 46-clock sequence:
-// Clocks 1-24: Read ADC data (done before calling this)
-// Clocks 25-27: 3 additional pulses
-// Clocks 28-29: Switch DRDY/DOUT to input
-// Clocks 30-36: Send command 0x65 (7 bits, MSB first)
-// Clock 37: Switch direction
-// Clocks 38-45: Send 8-bit config data (MSB first)
-// Clock 46: Complete and pull DOUT high
+// This function is called after:
+// - Clocks 1-24: ADC data read (done by caller)
+// - Clock 25: One pulse after read (done by caller)
+// This function performs:
+// - Clocks 26-27: 2 additional pulses
+// - Clocks 28-29: Prep for command input
+// - Clocks 30-36: Send command 0x65 (7 bits, MSB first)
+// - Clock 37: Switch direction
+// - Clocks 38-45: Send 8-bit config data (MSB first)
+// - Clock 46: Complete and pull DOUT high
 static void
 cs1237_write_config(struct cs1237_adc *cs1237, uint8_t config)
 {
     int i;
-    // Clocks 25-27: Additional pulses after 24-bit data read
-    for (i = 0; i < 3; i++) {
+    // Clocks 26-27: Additional pulses (25 already done by caller)
+    for (i = 0; i < 2; i++) {
         irq_disable();
         gpio_out_toggle_noirq(cs1237->sclk);
         cs1237_delay_noirq();
@@ -268,12 +270,32 @@ cs1237_read_adc(struct cs1237_adc *cs1237, uint8_t oid)
     uint_fast8_t dout_state = gpio_in_read(cs1237->dout);
     irq_enable();
     
-    // Mark as configured but DON'T write config automatically
-    // Config write corrupts chip - only do it via manual command
+    // Configure chip after first successful read (only once)
     if (!(cs1237->flags & CS_CONFIGURED) && dout_state) {
+        // Wait for chip to be ready (DOUT goes low again)
+        // This ensures we don't try to configure during a conversion
+        uint32_t timeout = timer_read_time() + timer_from_us(500000); // 500ms timeout
+        while (gpio_in_read(cs1237->dout) && !timer_is_before(timeout, timer_read_time())) {
+            // Wait for DOUT to go low (data ready)
+        }
+        
+        // If data is ready, write configuration
+        if (!gpio_in_read(cs1237->dout)) {
+            // Read the pending data first (clocks 1-24)
+            cs1237_raw_read(cs1237->dout, cs1237->sclk, 24);
+            // One pulse after read (clock 25)
+            irq_disable();
+            gpio_out_toggle_noirq(cs1237->sclk);
+            cs1237_delay_noirq();
+            gpio_out_toggle_noirq(cs1237->sclk);
+            cs1237_delay_noirq();
+            irq_enable();
+            
+            // Now write config
+            cs1237_write_config(cs1237, cs1237->config_byte);
+        }
+        
         cs1237->flags |= CS_CONFIGURED;
-        // Automatic config write disabled - use WRITE_CS1237_CONFIG command instead
-        // This prevents infinite retry loops
     }
 
     // Clear pending flag (and note if an overflow occurred)
