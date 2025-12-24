@@ -153,6 +153,23 @@ force_safety_limit: 2000
 6. **Probe Testing**: Run test taps
 7. **Long-term Stability**: Monitor for drift
 
+## Configuration Write Behavior
+
+The CS1237 requires configuration to be written to set the sample rate, gain, and channel. The driver handles this automatically:
+
+- **Automatic Write**: On first successful data read after boot, the driver automatically writes the configuration specified in your config file
+- **Timing**: The driver waits for the next sample to be ready, reads it, then performs the 46-clock configuration write sequence per datasheet Figure 9
+- **One Attempt**: Configuration write is attempted only once per boot to avoid potential issues
+- **Manual Trigger**: Use `WRITE_CS1237_CONFIG LOAD_CELL=<name>` (or just `WRITE_CS1237_CONFIG` if unnamed) to manually trigger a configuration write
+
+### Important Configuration Notes
+
+1. **Temperature Mode**: When using `channel: TEMP`, gain is automatically forced to 1 (per datasheet requirement). Do not set gain to any other value.
+
+2. **Reference Output**: The driver enables the CS1237's internal reference output (REFO) which may be required by some load cell modules.
+
+3. **Default Operation**: If configuration write is not performed, the CS1237 operates at its power-on defaults: 10 Hz, gain 128, channel A.
+
 ## Troubleshooting
 
 ### No Data / Communication Errors
