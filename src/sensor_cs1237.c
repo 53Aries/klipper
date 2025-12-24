@@ -268,21 +268,11 @@ cs1237_read_adc(struct cs1237_adc *cs1237, uint8_t oid)
     uint_fast8_t dout_state = gpio_in_read(cs1237->dout);
     irq_enable();
     
-    // Configure chip after first successful read
-    // Write config 3 times to attempt recovery from corrupted state
+    // Mark as configured but DON'T write config automatically
+    // Config write corrupts chip - only do it via manual command
     if (!(cs1237->flags & CS_CONFIGURED) && dout_state) {
-        // First config write attempt
-        cs1237_write_config(cs1237, cs1237->config_byte);
-        cs1237_delay();
-        cs1237_delay();
-        // Second config write attempt
-        cs1237_write_config(cs1237, cs1237->config_byte);
-        cs1237_delay();
-        cs1237_delay();
-        // Third config write attempt  
-        cs1237_write_config(cs1237, cs1237->config_byte);
         cs1237->flags |= CS_CONFIGURED;
-        // Mark that we attempted config (even if it didn't work)
+        // Automatic config write disabled - use WRITE_CS1237_CONFIG command instead
         // This prevents infinite retry loops
     }
 
