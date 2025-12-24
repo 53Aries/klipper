@@ -116,9 +116,20 @@ class CS1237:
             "query_cs1237 oid=%c rest_ticks=%u")
         self.attach_probe_cmd = self.mcu.lookup_command(
             "cs1237_attach_load_cell_probe oid=%c load_cell_probe_oid=%c")
+        self.set_config_cmd = self.mcu.lookup_command(
+            "cs1237_set_config oid=%c")
         self.ffreader.setup_query_command("query_cs1237_status oid=%c",
                                           oid=self.oid,
                                           cq=self.mcu.alloc_command_queue())
+        # Register gcode command to manually trigger config write
+        gcode = self.printer.lookup_object('gcode')
+        gcode.register_mux_command("CS1237_WRITE_CONFIG", "CHIP",
+                                   self.name, self.cmd_CS1237_WRITE_CONFIG,
+                                   desc="Manually write CS1237 configuration")
+
+    def cmd_CS1237_WRITE_CONFIG(self, gcmd):
+        self.set_config_cmd.send([self.oid])
+        gcmd.respond_info("CS1237 configuration write triggered")
 
     def get_mcu(self):
         return self.mcu

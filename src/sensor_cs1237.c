@@ -271,14 +271,19 @@ cs1237_read_adc(struct cs1237_adc *cs1237, uint8_t oid)
     // Configure chip after first successful read
     // Write config 3 times to attempt recovery from corrupted state
     if (!(cs1237->flags & CS_CONFIGURED) && dout_state) {
+        // First config write attempt
         cs1237_write_config(cs1237, cs1237->config_byte);
         cs1237_delay();
         cs1237_delay();
+        // Second config write attempt
         cs1237_write_config(cs1237, cs1237->config_byte);
         cs1237_delay();
         cs1237_delay();
+        // Third config write attempt  
         cs1237_write_config(cs1237, cs1237->config_byte);
         cs1237->flags |= CS_CONFIGURED;
+        // Mark that we attempted config (even if it didn't work)
+        // This prevents infinite retry loops
     }
 
     // Clear pending flag (and note if an overflow occurred)
@@ -377,6 +382,36 @@ command_query_cs1237_status(const uint32_t *args)
     sensor_bulk_status(&cs1237->sb, oid, start_t, 0, pending_bytes);
 }
 DECL_COMMAND(command_query_cs1237_status, "query_cs1237_status oid=%c");
+
+// Manual command to force configuration write
+void
+command_cs1237_set_config(const uint32_t *args)
+{
+    uint8_t oid = args[0];
+    struct cs1237_adc *cs1237 = oid_lookup(oid, command_config_cs1237);
+    
+    // Wait for data ready, then write config
+    uint32_t timeout = timer_read_time() + timer_from_us(500000); // 500ms timeout
+    while (!cs1237_is_data_ready(cs1237)) {
+        if (timer_is_before(timeout, timer_read_time()))
+            return; // Timeout - chip not responding
+    }
+    
+    // Read the current sample to clear DRDY
+    cs1237_raw_read(cs1237->dout, cs1237->sclk, 24);
+    
+    // One pulse to complete read
+    irq_disable();
+    gpio_out_toggle_noirq(cs1237->sclk);
+    cs1237_delay_noirq();
+    gpio_out_toggle_noirq(cs1237->sclk);
+    cs1237_delay_noirq();
+    irq_enable();
+    
+    // Write configuration
+    cs1237_write_config(cs1237, cs1237->config_byte);
+}
+DECL_COMMAND(command_cs1237_set_config, "cs1237_set_config oid=%c");
 
 // Background task that performs measurements
 void
