@@ -80,6 +80,11 @@ class LoadCellCommandHelper:
         gcode.register_mux_command("LOAD_CELL_DIAGNOSTIC", "LOAD_CELL", name,
                                    self.cmd_LOAD_CELL_DIAGNOSTIC,
                                    desc=self.cmd_LOAD_CELL_DIAGNOSTIC_help)
+        # CS1237 specific command
+        if hasattr(self.load_cell.sensor, 'write_config'):
+            gcode.register_mux_command("WRITE_CS1237_CONFIG", "LOAD_CELL", name,
+                                       self.cmd_WRITE_CS1237_CONFIG,
+                                       desc=self.cmd_WRITE_CS1237_CONFIG_help)
 
     cmd_LOAD_CELL_TARE_help = "Set the Zero point of the load cell"
     def cmd_LOAD_CELL_TARE(self, gcmd):
@@ -145,6 +150,14 @@ class LoadCellCommandHelper:
         gcmd.respond_info("Sample range / sensor capacity: %.5f%%"
                           % ((max_pct - min_pct) / 2.))
 
+    cmd_WRITE_CS1237_CONFIG_help = "Manually write CS1237 configuration register"
+    def cmd_WRITE_CS1237_CONFIG(self, gcmd):
+        if hasattr(self.load_cell.sensor, 'write_config'):
+            self.load_cell.sensor.write_config()
+            gcmd.respond_info("CS1237 configuration write triggered")
+        else:
+            gcmd.respond_info("Sensor does not support manual config write")
+
 # Class to guide the user through calibrating a load cell
 class LoadCellGuidedCalibrationHelper:
     def __init__(self, printer, load_cell):
@@ -177,10 +190,6 @@ class LoadCellGuidedCalibrationHelper:
         register_command("TARE", self.cmd_TARE, desc=self.cmd_TARE_help)
         register_command("CALIBRATE", self.cmd_CALIBRATE,
                          desc=self.cmd_CALIBRATE_help)
-        # CS1237 specific command
-        if hasattr(self.load_cell.sensor, 'write_config'):
-            register_command("WRITE_CS1237_CONFIG", self.cmd_WRITE_CS1237_CONFIG,
-                             desc=self.cmd_WRITE_CS1237_CONFIG_help)
 
     # convert the delta of counts to a counts/gram metric
     def counts_per_gram(self, grams, cal_counts):
@@ -234,13 +243,6 @@ class LoadCellGuidedCalibrationHelper:
         gcmd.respond_info("Now apply a known force to the load cell and enter \
                          the force value with:\n CALIBRATE GRAMS=nnn")
 
-    cmd_WRITE_CS1237_CONFIG_help = "Manually write CS1237 configuration register"
-    def cmd_WRITE_CS1237_CONFIG(self, gcmd):
-        if hasattr(self.load_cell.sensor, 'write_config'):
-            self.load_cell.sensor.write_config()
-            gcmd.respond_info("CS1237 configuration write triggered")
-        else:
-            gcmd.respond_info("Sensor does not support manual config write")
 
     cmd_CALIBRATE_help = "Enter the load cell value in grams"
     def cmd_CALIBRATE(self, gcmd):
