@@ -269,7 +269,14 @@ cs1237_read_adc(struct cs1237_adc *cs1237, uint8_t oid)
     irq_enable();
     
     // Configure chip after first successful read
+    // Write config 3 times to attempt recovery from corrupted state
     if (!(cs1237->flags & CS_CONFIGURED) && dout_state) {
+        cs1237_write_config(cs1237, cs1237->config_byte);
+        cs1237_delay();
+        cs1237_delay();
+        cs1237_write_config(cs1237, cs1237->config_byte);
+        cs1237_delay();
+        cs1237_delay();
         cs1237_write_config(cs1237, cs1237->config_byte);
         cs1237->flags |= CS_CONFIGURED;
     }
