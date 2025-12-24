@@ -178,7 +178,7 @@ class LoadCellGuidedCalibrationHelper:
         register_command("CALIBRATE", self.cmd_CALIBRATE,
                          desc=self.cmd_CALIBRATE_help)
         # CS1237 specific command
-        if hasattr(self.sensor, 'write_config'):
+        if hasattr(self.load_cell.sensor, 'write_config'):
             register_command("WRITE_CS1237_CONFIG", self.cmd_WRITE_CS1237_CONFIG,
                              desc=self.cmd_WRITE_CS1237_CONFIG_help)
 
@@ -236,8 +236,8 @@ class LoadCellGuidedCalibrationHelper:
 
     cmd_WRITE_CS1237_CONFIG_help = "Manually write CS1237 configuration register"
     def cmd_WRITE_CS1237_CONFIG(self, gcmd):
-        if hasattr(self.sensor, 'write_config'):
-            self.sensor.write_config()
+        if hasattr(self.load_cell.sensor, 'write_config'):
+            self.load_cell.sensor.write_config()
             gcmd.respond_info("CS1237 configuration write triggered")
         else:
             gcmd.respond_info("Sensor does not support manual config write")
