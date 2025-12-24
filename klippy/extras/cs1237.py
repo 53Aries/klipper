@@ -70,15 +70,21 @@ class CS1237:
                    640: CONFIG_SPEED_640HZ, 1280: CONFIG_SPEED_1280HZ}
         speed_config = sps_map[self.sps]
         
-        # Gain/channel choices
-        gain_options = {'1': CONFIG_GAIN_1, '2': CONFIG_GAIN_2,
-                        '64': CONFIG_GAIN_64, '128': CONFIG_GAIN_128}
-        gain_config = config.getchoice('gain', gain_options, default='128')
-        
         # Channel selection (normally use channel A for load cells)
         channel_options = {'A': CONFIG_CHANNEL_A, 'TEMP': CONFIG_CHANNEL_TEMP}
         channel_config = config.getchoice('channel', channel_options,
                                           default='A')
+        
+        # Gain/channel choices
+        # Per datasheet: Temperature mode REQUIRES PGA_SEL=00 (gain=1)
+        if channel_config == CONFIG_CHANNEL_TEMP:
+            # Temperature mode: force gain to 1
+            gain_config = CONFIG_GAIN_1
+        else:
+            # Load cell mode: allow all gains
+            gain_options = {'1': CONFIG_GAIN_1, '2': CONFIG_GAIN_2,
+                            '64': CONFIG_GAIN_64, '128': CONFIG_GAIN_128}
+            gain_config = config.getchoice('gain', gain_options, default='128')
         
         # Build 8-bit config byte: B7=0, B6=0 (REF on), B5-B4=speed, B3-B2=gain, B1-B0=channel
         self.config_byte = ((0 << 7) | (CONFIG_REFO_OFF << 6) | (speed_config << 4) 
