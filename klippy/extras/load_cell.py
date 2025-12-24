@@ -80,11 +80,10 @@ class LoadCellCommandHelper:
         gcode.register_mux_command("LOAD_CELL_DIAGNOSTIC", "LOAD_CELL", name,
                                    self.cmd_LOAD_CELL_DIAGNOSTIC,
                                    desc=self.cmd_LOAD_CELL_DIAGNOSTIC_help)
-        # CS1237 specific command
-        if hasattr(self.load_cell.sensor, 'write_config'):
-            gcode.register_mux_command("WRITE_CS1237_CONFIG", "LOAD_CELL", name,
-                                       self.cmd_WRITE_CS1237_CONFIG,
-                                       desc=self.cmd_WRITE_CS1237_CONFIG_help)
+        # CS1237 specific command - always register, check sensor type in handler
+        gcode.register_mux_command("WRITE_CS1237_CONFIG", "LOAD_CELL", name,
+                                   self.cmd_WRITE_CS1237_CONFIG,
+                                   desc=self.cmd_WRITE_CS1237_CONFIG_help)
 
     cmd_LOAD_CELL_TARE_help = "Set the Zero point of the load cell"
     def cmd_LOAD_CELL_TARE(self, gcmd):
