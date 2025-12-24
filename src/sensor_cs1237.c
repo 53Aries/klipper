@@ -326,13 +326,14 @@ cs1237_read_adc(struct cs1237_adc *cs1237, uint8_t oid)
     if (counts & 0x800000)
         counts |= 0xFF000000;
 
-    // Check for errors
-    if (!dout_state) {
-        // DOUT should be high after read - if still low, read failed (desync)
-        cs1237->last_error = SAMPLE_ERROR_DESYNC;
-    } else if (flags & CS_OVERFLOW) {
+    // Check for errors (be more tolerant in read-only mode)
+    cs1237->last_error = 0;
+    if (flags & CS_OVERFLOW) {
         // Transfer took too long
         cs1237->last_error = SAMPLE_ERROR_READ_TOO_LONG;
+    } else if (!dout_state && cs1237->drive_config) {
+        // Only treat lingering low DOUT as desync when we actually drive config
+        cs1237->last_error = SAMPLE_ERROR_DESYNC;
     }
 
     // forever send errors until reset
