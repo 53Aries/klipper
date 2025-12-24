@@ -67,7 +67,7 @@ class CS1237:
         
         # Map sample rate to config value
         sps_map = {10: CONFIG_SPEED_10HZ, 40: CONFIG_SPEED_40HZ,
-                   640: CONFIG_SPEED_640HZ, 1280: CONFIG_SPEED_1280HZ}
+               640: CONFIG_SPEED_640HZ, 1280: CONFIG_SPEED_1280HZ}
         speed_config = sps_map[self.sps]
         
         # Channel selection (normally use channel A for load cells)
@@ -86,10 +86,6 @@ class CS1237:
                             '64': CONFIG_GAIN_64, '128': CONFIG_GAIN_128}
             gain_config = config.getchoice('gain', gain_options, default='128')
         
-        # Build 8-bit config byte: B7=0, B6=0 (REF on), B5-B4=speed, B3-B2=gain, B1-B0=channel
-        self.config_byte = ((0 << 7) | (CONFIG_REFO_OFF << 6) | (speed_config << 4) 
-                            | (gain_config << 2) | channel_config)
-        
         ## Bulk Sensor Setup
         self.bulk_queue = bulk_sensor.BulkDataQueue(mcu, oid=self.oid)
         # Clock tracking
@@ -104,6 +100,15 @@ class CS1237:
         self.query_cs1237_cmd = None
         self.attach_probe_cmd = None
         self.drive_config = config.getboolean('drive_config', True)
+        if not self.drive_config:
+            # When we can't drive DOUT (e.g. auto-dir level shifters), the chip
+            # stays at power-on defaults: 10Hz, gain 128, channel A, REF on.
+            # Force host timing to 10Hz to avoid overflow churn.
+            self.sps = 10
+            speed_config = CONFIG_SPEED_10HZ
+        # Build 8-bit config byte: B7=0, B6=0 (REF on), B5-B4=speed, B3-B2=gain, B1-B0=channel
+        self.config_byte = ((0 << 7) | (CONFIG_REFO_OFF << 6) | (speed_config << 4)
+                            | (gain_config << 2) | channel_config)
         mcu.add_config_cmd(
             "config_cs1237 oid=%d config=%d dout_pin=%s sclk_pin=%s drive_config=%d"
             % (self.oid, self.config_byte, self.dout_pin, self.sclk_pin, 1 if self.drive_config else 0))
