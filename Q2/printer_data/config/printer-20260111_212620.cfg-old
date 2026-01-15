@@ -1,0 +1,67 @@
+#[include manta_m4p.cfg]
+#[include H36.cfg]
+#[include expander.cfg]
+#[include mmu/base/*.cfg]
+#[include mmu/optional/client_macros.cfg]
+[include Hardware/*.cfg]
+[include Macros/*.cfg]
+[include mainsail.cfg]
+
+[exclude_object]
+
+[printer]
+kinematics:corexy
+max_velocity: 600
+max_accel: 20000
+square_corner_velocity: 8
+max_z_velocity: 10
+max_z_accel: 250
+
+[force_move]
+enable_force_move: True
+
+[bed_screws]
+screw1:30,30
+screw1_name: Front left
+screw2: 240,30
+screw2_name: Front right
+screw3: 240,240
+screw3_name: Last right
+screw4: 30,240
+
+[z_tilt]
+z_positions:
+    -15,137
+    285,137
+
+points:
+    10,137
+    260,137
+
+speed: 150
+horizontal_move_z: 5
+retries: 2
+retry_tolerance: 0.05
+
+[bed_mesh]
+speed: 100 #100
+horizontal_move_z:5
+mesh_min:10,10
+mesh_max:260,260  
+probe_count:6,6
+algorithm:lagrange #bicubic
+#bicubic_tension:0.2
+mesh_pps: 2, 2
+#fade_target:0
+
+
+#[mcu box]
+#serial: /dev/serial/by-id/usb-Klipper_stm32f401xc_Q_Box-if00
+#restart_method: command
+
+#*# <---------------------- SAVE_CONFIG ---------------------->
+#*# DO NOT EDIT THIS BLOCK OR BELOW. The contents are auto-generated.
+#*#
+#*# [load_cell_probe]
+#*# counts_per_gram = 160.30677
+#*# reference_tare_counts = 250977
